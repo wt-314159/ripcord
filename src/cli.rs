@@ -57,6 +57,12 @@ pub struct RunArgs {
     /// Output container format
     #[arg(long)]
     pub output_format: Option<OutputFormat>,
+    /// Write makemkvcon output to this file for this run (overrides config)
+    #[arg(long)]
+    pub mkv_log_file: Option<PathBuf>,
+    /// Write HandBrakeCLI output to this file for this run (overrides config)
+    #[arg(long)]
+    pub hb_log_file: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug)]
@@ -84,6 +90,9 @@ pub struct EncodeArgs {
     /// Output container format
     #[arg(long)]
     pub output_format: Option<OutputFormat>,
+    /// Write HandBrakeCLI output to this file for this run (overrides config)
+    #[arg(long)]
+    pub hb_log_file: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug)]

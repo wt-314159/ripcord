@@ -43,10 +43,15 @@ extra_args = []
 # Show makemkvcon's ripping progress in the terminal while ripping.
 show_progress = true
 
-# Write makemkvcon messages to this file instead of stdout.
-# Combine with show_progress = true to see live progress while keeping the
-# verbose message output out of the way.
+# Where to send makemkvcon's non-progress output. The two options below are
+# mutually exclusive — if both are set, log_dir takes precedence.
+#
+# log_file: write all output to a single fixed file (appended across runs).
 # log_file = "/var/log/ripcord/makemkv.log"
+#
+# log_dir: write to a new timestamped file per disc, named <title>_<unix>.log.
+#          The directory must already exist.
+# log_dir = "/var/log/ripcord"
 
 
 [handbrake]
@@ -76,8 +81,15 @@ extra_args = []
 # Show encoding progress (percentage complete) in the terminal while encoding.
 show_progress = true
 
-# Write HandBrakeCLI output to this file instead of stdout.
+# Where to send HandBrakeCLI's non-progress output. The two options below are
+# mutually exclusive — if both are set, log_dir takes precedence.
+#
+# log_file: write all output to a single fixed file (appended across runs).
 # log_file = "/var/log/ripcord/handbrake.log"
+#
+# log_dir: write to a new timestamped file per encode, named <input_stem>_<unix>.log.
+#          The directory must already exist.
+# log_dir = "/var/log/ripcord"
 
 
 [upload]

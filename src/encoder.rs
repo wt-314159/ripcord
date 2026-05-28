@@ -25,10 +25,9 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config) -> Result<()> {
     let mut child = cmd.spawn()?;
     let stdout = child.stdout.take().expect("stdout was piped");
 
-    let mut log_writer: Option<BufWriter<File>> = cfg
-        .handbrake
-        .logging
-        .log_file
+    let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("encode");
+    let log_path = cfg.handbrake.logging.get_log_file(stem);
+    let mut log_writer: Option<BufWriter<File>> = log_path
         .as_ref()
         .map(|p| {
             Ok::<_, anyhow::Error>(BufWriter::new(

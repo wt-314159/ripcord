@@ -1,5 +1,9 @@
 use anyhow::Result;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +85,7 @@ impl Default for HandBrakeConfig {
 #[serde(default)]
 pub struct LoggingConfig {
     pub log_file: Option<PathBuf>,
+    pub log_dir: Option<PathBuf>,
     pub show_progress: bool,
 }
 
@@ -88,8 +93,24 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             log_file: None,
+            log_dir: None,
             show_progress: true,
         }
+    }
+}
+
+impl LoggingConfig {
+    /// Returns the log file path for this run, or `None` if output goes to stdout.
+    /// `title` is used as the filename stem when `log_dir` is set.
+    pub fn get_log_file(&self, title: &str) -> Option<PathBuf> {
+        if let Some(dir) = &self.log_dir {
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            return Some(dir.join(format!("{title}_{ts}.log")));
+        }
+        self.log_file.clone()
     }
 }
 
@@ -151,6 +172,8 @@ impl Config {
             self.handbrake.extra_args = v.split_whitespace().map(String::from).collect();
         });
         apply_override(&args.output_format, |v| self.handbrake.output_format = v);
+        apply_override(&args.mkv_log_file, |v| self.makemkv.logging.log_file = Some(v));
+        apply_override(&args.hb_log_file, |v| self.handbrake.logging.log_file = Some(v));
     }
 
     fn apply_encode_overrides(&mut self, args: &EncodeArgs) {
@@ -160,6 +183,7 @@ impl Config {
             self.handbrake.extra_args = v.split_whitespace().map(String::from).collect();
         });
         apply_override(&args.output_format, |v| self.handbrake.output_format = v);
+        apply_override(&args.hb_log_file, |v| self.handbrake.logging.log_file = Some(v));
         if args.no_upload {
             self.upload.no_upload = true;
         }
@@ -181,15 +205,24 @@ mod tests {
     // Helpers to build Cli structs without going through argument parsing.
 
     fn cli_no_command() -> Cli {
-        Cli { config: None, command: None }
+        Cli {
+            config: None,
+            command: None,
+        }
     }
 
     fn cli_run(args: cli::RunArgs) -> Cli {
-        Cli { config: None, command: Some(Command::Run(args)) }
+        Cli {
+            config: None,
+            command: Some(Command::Run(args)),
+        }
     }
 
     fn cli_encode(args: cli::EncodeArgs) -> Cli {
-        Cli { config: None, command: Some(Command::Encode(args)) }
+        Cli {
+            config: None,
+            command: Some(Command::Encode(args)),
+        }
     }
 
     fn bare_run_args() -> cli::RunArgs {
@@ -202,6 +235,8 @@ mod tests {
             mkv_args: None,
             hb_args: None,
             output_format: None,
+            mkv_log_file: None,
+            hb_log_file: None,
         }
     }
 
@@ -215,6 +250,7 @@ mod tests {
             no_upload: false,
             hb_args: None,
             output_format: None,
+            hb_log_file: None,
         }
     }
 
@@ -237,6 +273,8 @@ mod tests {
         assert!(cfg.makemkv.logging.show_progress);
         assert!(cfg.handbrake.logging.show_progress);
         assert!(cfg.makemkv.logging.log_file.is_none());
+        assert!(cfg.makemkv.logging.log_dir.is_none());
+        assert!(cfg.handbrake.logging.log_dir.is_none());
         assert!(cfg.paths.nas_mount.is_none());
     }
 
@@ -244,10 +282,13 @@ mod tests {
 
     #[test]
     fn partial_toml_fills_missing_fields_with_defaults() {
-        let cfg: Config = toml::from_str(r#"
+        let cfg: Config = toml::from_str(
+            r#"
             [handbrake]
             preset = "Fast 1080p30"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(cfg.handbrake.preset, "Fast 1080p30");
         assert_eq!(cfg.makemkv.min_length_seconds, 120);
         assert_eq!(cfg.makemkv.disc_device, "disc:0");
@@ -255,21 +296,27 @@ mod tests {
 
     #[test]
     fn toml_loads_output_format_enum() {
-        let cfg: Config = toml::from_str(r#"
+        let cfg: Config = toml::from_str(
+            r#"
             [handbrake]
             output_format = "mp4"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(cfg.handbrake.output_format, OutputFormat::Mp4);
     }
 
     #[test]
     fn toml_loads_extras_mode_keep() {
-        let cfg: Config = toml::from_str(r#"
+        let cfg: Config = toml::from_str(
+            r#"
             [extras]
             mode = "keep"
             encode = true
             upload = true
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(cfg.extras.mode, ExtrasMode::Keep);
         assert!(cfg.extras.encode);
         assert!(cfg.extras.upload);
@@ -277,11 +324,14 @@ mod tests {
 
     #[test]
     fn toml_loads_nested_logging_section() {
-        let cfg: Config = toml::from_str(r#"
+        let cfg: Config = toml::from_str(
+            r#"
             [makemkv.logging]
             show_progress = false
             log_file = "/tmp/makemkv.log"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert!(!cfg.makemkv.logging.show_progress);
         assert_eq!(
             cfg.makemkv.logging.log_file,
@@ -297,9 +347,15 @@ mod tests {
         let serialised = toml::to_string_pretty(&original).unwrap();
         let reloaded: Config = toml::from_str(&serialised).unwrap();
         assert_eq!(reloaded.handbrake.preset, original.handbrake.preset);
-        assert_eq!(reloaded.makemkv.min_length_seconds, original.makemkv.min_length_seconds);
+        assert_eq!(
+            reloaded.makemkv.min_length_seconds,
+            original.makemkv.min_length_seconds
+        );
         assert_eq!(reloaded.extras.mode, original.extras.mode);
-        assert_eq!(reloaded.handbrake.output_format, original.handbrake.output_format);
+        assert_eq!(
+            reloaded.handbrake.output_format,
+            original.handbrake.output_format
+        );
     }
 
     // --- CLI run overrides ---
@@ -394,5 +450,76 @@ mod tests {
         args.output_format = Some(OutputFormat::M4v);
         let cfg = Config::load(&cli_encode(args)).unwrap();
         assert_eq!(cfg.handbrake.output_format, OutputFormat::M4v);
+    }
+
+    // --- get_log_file ---
+
+    #[test]
+    fn get_log_file_none_when_neither_set() {
+        let log = LoggingConfig::default();
+        assert!(log.get_log_file("The Matrix").is_none());
+    }
+
+    #[test]
+    fn get_log_file_returns_log_file_path() {
+        let log = LoggingConfig { log_file: Some("/tmp/out.log".into()), ..Default::default() };
+        assert_eq!(log.get_log_file("The Matrix"), Some(PathBuf::from("/tmp/out.log")));
+    }
+
+    #[test]
+    fn get_log_file_dir_takes_precedence_over_file() {
+        let log = LoggingConfig {
+            log_file: Some("/tmp/out.log".into()),
+            log_dir: Some("/var/log/ripcord".into()),
+            ..Default::default()
+        };
+        let result = log.get_log_file("The_Matrix").unwrap();
+        assert_eq!(result.parent().unwrap(), std::path::Path::new("/var/log/ripcord"));
+        assert!(result.file_name().unwrap().to_str().unwrap().starts_with("The_Matrix_"));
+        assert!(result.extension().unwrap() == "log");
+    }
+
+    #[test]
+    fn get_log_file_dir_embeds_title_in_filename() {
+        let log = LoggingConfig { log_dir: Some("/tmp/logs".into()), ..Default::default() };
+        let result = log.get_log_file("Inception").unwrap();
+        let name = result.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with("Inception_"), "expected 'Inception_…', got '{name}'");
+    }
+
+    #[test]
+    fn toml_loads_log_dir() {
+        let cfg: Config = toml::from_str(r#"
+            [makemkv.logging]
+            log_dir = "/var/log/ripcord"
+        "#).unwrap();
+        assert_eq!(cfg.makemkv.logging.log_dir, Some(PathBuf::from("/var/log/ripcord")));
+        assert!(cfg.makemkv.logging.log_file.is_none());
+    }
+
+    // --- CLI log file overrides ---
+
+    #[test]
+    fn run_mkv_log_file_overrides_config() {
+        let mut args = bare_run_args();
+        args.mkv_log_file = Some("/tmp/makemkv.log".into());
+        let cfg = Config::load(&cli_run(args)).unwrap();
+        assert_eq!(cfg.makemkv.logging.log_file, Some(PathBuf::from("/tmp/makemkv.log")));
+    }
+
+    #[test]
+    fn run_hb_log_file_overrides_config() {
+        let mut args = bare_run_args();
+        args.hb_log_file = Some("/tmp/handbrake.log".into());
+        let cfg = Config::load(&cli_run(args)).unwrap();
+        assert_eq!(cfg.handbrake.logging.log_file, Some(PathBuf::from("/tmp/handbrake.log")));
+    }
+
+    #[test]
+    fn encode_hb_log_file_overrides_config() {
+        let mut args = bare_encode_args();
+        args.hb_log_file = Some("/tmp/handbrake.log".into());
+        let cfg = Config::load(&cli_encode(args)).unwrap();
+        assert_eq!(cfg.handbrake.logging.log_file, Some(PathBuf::from("/tmp/handbrake.log")));
     }
 }
