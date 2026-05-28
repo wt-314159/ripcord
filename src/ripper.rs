@@ -168,3 +168,161 @@ impl std::fmt::Display for RipError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    // --- sanitize_filename ---
+
+    #[test]
+    fn sanitize_passes_through_allowed_chars() {
+        assert_eq!(
+            sanitize_filename("Schindler's List (1993)"),
+            "Schindler's List (1993)"
+        );
+    }
+
+    #[test]
+    fn sanitize_replaces_colon() {
+        assert_eq!(
+            sanitize_filename("Batman: The Dark Knight"),
+            "Batman_ The Dark Knight"
+        );
+    }
+
+    #[test]
+    fn sanitize_replaces_slashes() {
+        assert_eq!(sanitize_filename("A/B\\C"), "A_B_C");
+    }
+
+    #[test]
+    fn sanitize_trims_leading_trailing_spaces() {
+        assert_eq!(sanitize_filename("  Movie  "), "Movie");
+    }
+
+    #[test]
+    fn sanitize_trims_leading_trailing_underscores() {
+        assert_eq!(sanitize_filename("___title___"), "title");
+    }
+
+    #[test]
+    fn sanitize_all_unsafe_chars_returns_placeholder() {
+        assert_eq!(sanitize_filename("@#$%"), "_");
+    }
+
+    #[test]
+    fn sanitize_empty_string_returns_placeholder() {
+        assert_eq!(sanitize_filename(""), "_");
+    }
+
+    #[test]
+    fn sanitize_preserves_numbers_and_dots() {
+        assert_eq!(sanitize_filename("2001. A Space Odyssey"), "2001. A Space Odyssey");
+    }
+
+    // --- parse_duration ---
+
+    #[test]
+    fn parse_duration_standard() {
+        assert_eq!(parse_duration("2:01:45"), Some(7305));
+    }
+
+    #[test]
+    fn parse_duration_zero() {
+        assert_eq!(parse_duration("0:00:00"), Some(0));
+    }
+
+    #[test]
+    fn parse_duration_multi_hour() {
+        assert_eq!(parse_duration("3:30:00"), Some(12600));
+    }
+
+    #[test]
+    fn parse_duration_rejects_too_few_parts() {
+        assert_eq!(parse_duration("1:30"), None);
+    }
+
+    #[test]
+    fn parse_duration_rejects_too_many_parts() {
+        assert_eq!(parse_duration("1:2:3:4"), None);
+    }
+
+    #[test]
+    fn parse_duration_rejects_non_numeric() {
+        assert_eq!(parse_duration("not_a_time"), None);
+    }
+
+    #[test]
+    fn parse_duration_rejects_empty() {
+        assert_eq!(parse_duration(""), None);
+    }
+
+    // --- smart_min_length_seconds ---
+
+    #[test]
+    fn smart_min_length_subtracts_60_from_max() {
+        let titles = vec![
+            DiscTitle { id: 0, duration_seconds: 300 },
+            DiscTitle { id: 1, duration_seconds: 7305 },
+            DiscTitle { id: 2, duration_seconds: 600 },
+        ];
+        assert_eq!(smart_min_length_seconds(&titles), Some(7245));
+    }
+
+    #[test]
+    fn smart_min_length_empty_slice_returns_none() {
+        assert_eq!(smart_min_length_seconds(&[]), None);
+    }
+
+    #[test]
+    fn smart_min_length_saturates_at_zero() {
+        // A very short disc shouldn't produce an underflowing value.
+        let titles = vec![DiscTitle { id: 0, duration_seconds: 30 }];
+        assert_eq!(smart_min_length_seconds(&titles), Some(0));
+    }
+
+    #[test]
+    fn smart_min_length_single_title() {
+        let titles = vec![DiscTitle { id: 0, duration_seconds: 7200 }];
+        assert_eq!(smart_min_length_seconds(&titles), Some(7140));
+    }
+
+    // --- find_main_feature ---
+
+    #[test]
+    fn find_main_feature_picks_largest_mkv() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("title_t00.mkv"), vec![0u8; 1_000]).unwrap();
+        fs::write(dir.path().join("title_t01.mkv"), vec![0u8; 5_000]).unwrap();
+        fs::write(dir.path().join("title_t02.mkv"), vec![0u8; 2_000]).unwrap();
+
+        let result = find_main_feature(dir.path()).unwrap();
+        assert_eq!(result.file_name().unwrap(), "title_t01.mkv");
+    }
+
+    #[test]
+    fn find_main_feature_ignores_non_mkv_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("notes.txt"), vec![0u8; 9_999]).unwrap();
+        fs::write(dir.path().join("title_t00.mkv"), vec![0u8; 100]).unwrap();
+
+        let result = find_main_feature(dir.path()).unwrap();
+        assert_eq!(result.file_name().unwrap(), "title_t00.mkv");
+    }
+
+    #[test]
+    fn find_main_feature_errors_when_no_mkv_present() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("somefile.txt"), b"content").unwrap();
+
+        assert!(find_main_feature(dir.path()).is_err());
+    }
+
+    #[test]
+    fn find_main_feature_errors_on_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(find_main_feature(dir.path()).is_err());
+    }
+}

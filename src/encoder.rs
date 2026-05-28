@@ -113,3 +113,74 @@ impl std::fmt::Display for EncodeError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- is_progress_line ---
+
+    #[test]
+    fn progress_line_encoding_prefix() {
+        assert!(is_progress_line(
+            "Encoding: task 1 of 1, 45.67 % (120.00 fps, avg 115.43 fps, ETA 00h15m30s)"
+        ));
+    }
+
+    #[test]
+    fn progress_line_muxing_prefix() {
+        assert!(is_progress_line("Muxing: task 2 of 2, 99.00 %"));
+    }
+
+    #[test]
+    fn progress_line_rejects_other_output() {
+        assert!(!is_progress_line("Opening /dev/sr0"));
+        assert!(!is_progress_line("[12:34:56] scan: scanning title 1 of 10"));
+        assert!(!is_progress_line(""));
+    }
+
+    // --- parse_progress_pct ---
+
+    #[test]
+    fn parse_progress_typical_line() {
+        let pct = parse_progress_pct(
+            "Encoding: task 1 of 1, 45.67 % (120.00 fps, avg 115.43 fps, ETA 00h15m30s)",
+        )
+        .unwrap();
+        assert!((pct - 45.67).abs() < 0.01, "expected ~45.67, got {pct}");
+    }
+
+    #[test]
+    fn parse_progress_zero() {
+        let pct = parse_progress_pct(
+            "Encoding: task 1 of 1, 0.00 % (0.00 fps, avg 0.00 fps, ETA 00h00m00s)",
+        )
+        .unwrap();
+        assert_eq!(pct, 0.0);
+    }
+
+    #[test]
+    fn parse_progress_hundred() {
+        let pct = parse_progress_pct("Encoding: task 1 of 1, 100.00 %").unwrap();
+        assert!((pct - 100.0).abs() < 0.01, "expected ~100.0, got {pct}");
+    }
+
+    #[test]
+    fn parse_progress_muxing_line() {
+        let pct = parse_progress_pct("Muxing: task 2 of 2, 75.50 %").unwrap();
+        assert!((pct - 75.50).abs() < 0.01, "expected ~75.50, got {pct}");
+    }
+
+    #[test]
+    fn parse_progress_no_percent_returns_none() {
+        assert_eq!(parse_progress_pct("Opening /dev/sr0"), None);
+        assert_eq!(parse_progress_pct(""), None);
+    }
+
+    #[test]
+    fn parse_progress_without_trailing_detail() {
+        // Some builds omit the fps/ETA detail.
+        let pct = parse_progress_pct("Encoding: task 1 of 1, 33.33 %").unwrap();
+        assert!((pct - 33.33).abs() < 0.01, "expected ~33.33, got {pct}");
+    }
+}
