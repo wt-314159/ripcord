@@ -237,8 +237,16 @@ mod tests {
 
     fn cfg_with_extras(mode: ExtrasMode, encode: bool, upload: bool, no_upload: bool) -> Config {
         let mut cfg = Config::default();
-        cfg.extras = ExtrasConfig { mode, encode, upload, ..Default::default() };
-        cfg.upload = UploadConfig { no_upload, ..Default::default() };
+        cfg.extras = ExtrasConfig {
+            mode,
+            encode,
+            upload,
+            ..Default::default()
+        };
+        cfg.upload = UploadConfig {
+            no_upload,
+            ..Default::default()
+        };
         cfg
     }
 
@@ -295,7 +303,10 @@ mod tests {
         let cfg = cfg_with_format(OutputFormat::Mkv);
         let mkv = std::path::Path::new("/tmp/rips/Batman__The_Dark_Knight/title_t00.mkv");
         let result = local_encode_path(mkv, "Batman: The Dark Knight", false, &cfg);
-        assert_eq!(result, std::path::Path::new("/tmp/rips/Batman__The_Dark_Knight/Batman_ The Dark Knight.mkv"));
+        assert_eq!(
+            result,
+            std::path::Path::new("/tmp/rips/Batman__The_Dark_Knight/Batman_ The Dark Knight.mkv")
+        );
     }
 
     #[test]
@@ -304,7 +315,10 @@ mod tests {
         let mkv = std::path::Path::new("/tmp/rips/The_Matrix/title_t00.mkv");
         let result = local_encode_path(mkv, "The Matrix", false, &cfg);
         // sanitize_filename preserves spaces, so "The Matrix" stays "The Matrix"
-        assert_eq!(result, std::path::Path::new("/tmp/rips/The_Matrix/The Matrix.mp4"));
+        assert_eq!(
+            result,
+            std::path::Path::new("/tmp/rips/The_Matrix/The Matrix.mp4")
+        );
     }
 
     #[test]
@@ -312,7 +326,10 @@ mod tests {
         let cfg = cfg_with_format(OutputFormat::Mkv);
         let mkv = std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mkv");
         let result = local_encode_path(mkv, "The Matrix", true, &cfg);
-        assert_eq!(result, std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mkv"));
+        assert_eq!(
+            result,
+            std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mkv")
+        );
     }
 
     #[test]
@@ -320,7 +337,10 @@ mod tests {
         let cfg = cfg_with_format(OutputFormat::Mp4);
         let mkv = std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mkv");
         let result = local_encode_path(mkv, "The Matrix", true, &cfg);
-        assert_eq!(result, std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mp4"));
+        assert_eq!(
+            result,
+            std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mp4")
+        );
     }
 
     // --- find_extras ---
