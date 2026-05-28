@@ -1,0 +1,118 @@
+# ripcord example configuration
+# Copy this file to config.toml and edit as needed.
+# Pass it to ripcord with: ripcord --config /path/to/config.toml <command>
+#
+# Alternatively, run `ripcord init-config [path]` to generate a minimal config
+# file at the given path (defaults to config.toml in the current directory).
+# That command produces a file with all the defaults filled in but without the
+# explanatory comments, so this example is useful as a reference alongside it.
+#
+# Most settings can also be overridden per-run via command-line flags.
+# Run `ripcord --help` or `ripcord <command> --help` for details.
+# Options marked "required" will cause an error if left unset when they are needed.
+
+[paths]
+# Where ripped MKV files are staged before encoding. Must be writable and have
+# enough free space for a full disc rip — Blu-rays can be up to ~50 GB.
+output_dir = "/tmp/ripcord"
+
+# Mount point of the NAS where encoded files are uploaded.
+# Files are written to:
+#   Main feature: <nas_mount>/<Title>/<Title>.<ext>
+#   Extras:       <nas_mount>/<Title>/<extras.folder_name>/<filename>.<ext>
+# Required when upload.no_upload = false.
+# nas_mount = "/mnt/nas/Movies"
+
+
+[makemkv]
+# Titles shorter than this (in seconds) are skipped during ripping.
+# Note: when extras.mode = "skip", this value is ignored — ripcord reads the disc
+# contents first and sets the threshold automatically so only the main feature
+# (the longest title) is ripped.
+min_length_seconds = 120
+
+# Which optical drive to rip from. disc:0 is the first drive, disc:1 the second, etc.
+disc_device = "disc:0"
+
+# Extra arguments appended directly to every makemkvcon invocation.
+# Useful for flags like --noscan that aren't exposed as first-class options.
+# See `makemkvcon --help` for the full list.
+extra_args = []
+
+[makemkv.logging]
+# Show makemkvcon's ripping progress in the terminal while ripping.
+show_progress = true
+
+# Write makemkvcon messages to this file instead of stdout.
+# Combine with show_progress = true to see live progress while keeping the
+# verbose message output out of the way.
+# log_file = "/var/log/ripcord/makemkv.log"
+
+
+[handbrake]
+# HandBrakeCLI preset to encode with. This can be any built-in preset name or
+# one defined in preset_file below.
+# Run `HandBrakeCLI --preset-list` to see all available built-in presets.
+preset = "H.265 MKV 1080p30"
+
+# Path to a HandBrakeCLI preset export file (.json). When set, the preset name
+# above is looked up in this file rather than in the built-in presets. Export
+# your presets from the HandBrake GUI via File → Export Presets.
+# preset_file = "/home/user/.config/HandBrake/UserPresets.json"
+
+# Container format of the encoded output file. This determines the file extension
+# used for both local output and the NAS destination.
+# Options: "mkv", "mp4", "m4v"
+output_format = "mkv"
+
+# Extra arguments appended directly to every HandBrakeCLI invocation.
+# Useful for hardware acceleration flags or anything not covered above, e.g.:
+#   extra_args = ["--encoder", "nvenc_h265"]   # NVIDIA GPU encoding
+#   extra_args = ["--encoder", "vt_h265"]      # Apple VideoToolbox
+# See `HandBrakeCLI --help` for the full list.
+extra_args = []
+
+[handbrake.logging]
+# Show encoding progress (percentage complete) in the terminal while encoding.
+show_progress = true
+
+# Write HandBrakeCLI output to this file instead of stdout.
+# log_file = "/var/log/ripcord/handbrake.log"
+
+
+[upload]
+# Set to true to skip all NAS uploads. Encoded files stay in output_dir.
+# Useful when you want to encode a batch locally and copy manually later.
+no_upload = false
+
+# If true, HandBrakeCLI writes its output directly to the final NAS path instead
+# of encoding to output_dir and then copying. This saves one full file copy but
+# has a downside: if the encode fails or the network drops mid-encode, a partial
+# file is left on the NAS with no way to distinguish it from a complete one.
+# The safe default is false: encode locally, copy only on success.
+direct_to_nas = false
+
+
+[extras]
+# How non-main-feature titles on the disc are handled.
+#
+#   "skip" — Only rip the longest title (the main feature). Before ripping,
+#            ripcord calls `makemkvcon info` to find all title lengths, then sets
+#            makemkvcon's --minlength just below the main feature's duration so
+#            nothing else is ripped. Fastest option; no extras are kept.
+#
+#   "keep" — Rip every title that meets min_length_seconds. The longest title is
+#            treated as the main feature; all others are treated as extras and
+#            handled according to the encode/upload settings below.
+mode = "skip"
+
+# Encode extras with HandBrakeCLI using the same preset as the main feature.
+# Only relevant when mode = "keep".
+encode = false
+
+# Upload extras to the NAS under <nas_mount>/<Title>/<folder_name>/.
+# Only relevant when mode = "keep".
+upload = false
+
+# Name of the subfolder created under each movie folder on the NAS for extras.
+folder_name = "extras"
