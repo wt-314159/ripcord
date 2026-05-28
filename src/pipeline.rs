@@ -355,8 +355,11 @@ mod tests {
 
         let mut extras = find_extras(dir.path(), &main).unwrap();
         extras.sort();
+        // Returns full paths, not just filenames.
         assert_eq!(extras.len(), 2);
-        assert!(!extras.iter().any(|p| p == &main));
+        assert!(extras.contains(&dir.path().join("title_t01.mkv")));
+        assert!(extras.contains(&dir.path().join("title_t02.mkv")));
+        assert!(!extras.contains(&main));
     }
 
     #[test]

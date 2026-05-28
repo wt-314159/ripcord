@@ -76,7 +76,7 @@ pub fn sanitize_filename(title: &str) -> String {
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric()
-                || matches!(c, ' ' | '.' | '_' | '-' | '(' | ')' | '\'' | '!')
+                || matches!(c, ' ' | '.' | '_' | '-' | '(' | ')' | '\'' | '!' | '[' | ']')
             {
                 c
             } else {
@@ -193,6 +193,14 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_preserves_square_brackets() {
+        assert_eq!(
+            sanitize_filename("Meet the Robinsons (2007) [imdbid-tt0396555]"),
+            "Meet the Robinsons (2007) [imdbid-tt0396555]"
+        );
+    }
+
+    #[test]
     fn sanitize_replaces_slashes() {
         assert_eq!(sanitize_filename("A/B\\C"), "A_B_C");
     }
@@ -299,7 +307,8 @@ mod tests {
         fs::write(dir.path().join("title_t02.mkv"), vec![0u8; 2_000]).unwrap();
 
         let result = find_main_feature(dir.path()).unwrap();
-        assert_eq!(result.file_name().unwrap(), "title_t01.mkv");
+        // Returns the full path, not just the filename.
+        assert_eq!(result, dir.path().join("title_t01.mkv"));
     }
 
     #[test]
@@ -309,7 +318,7 @@ mod tests {
         fs::write(dir.path().join("title_t00.mkv"), vec![0u8; 100]).unwrap();
 
         let result = find_main_feature(dir.path()).unwrap();
-        assert_eq!(result.file_name().unwrap(), "title_t00.mkv");
+        assert_eq!(result, dir.path().join("title_t00.mkv"));
     }
 
     #[test]
