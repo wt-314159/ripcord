@@ -182,8 +182,9 @@ Controlled by the `[extras]` section.
 |---|---|
 | `skip` (default) | Only the longest title is ripped. ripcord reads disc info first and sets makemkvcon's `--minlength` just below the main feature's duration, so shorter titles never touch disk. |
 | `keep` | Every title above `makemkv.min_length_seconds` is ripped. The longest becomes the main feature; all others are extras. |
+| `ask` | On each disc, ripcord asks the user whether to keep extras for that disc before ripping. Answer "y" to keep (behaves like "keep") or anything else to skip (behaves like "skip"). Useful when some discs have extras worth keeping and others don't. |
 
-When `mode = "keep"`, two additional flags control what happens to extras:
+When `mode = "keep"` (or `ask` and the user answers "y"), two additional flags control what happens to extras:
 
 ```toml
 [extras]

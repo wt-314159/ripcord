@@ -118,7 +118,7 @@ direct_to_nas = false
 #            handled according to the encode/upload settings below.
 #
 #   "ask"  — On each disc, prompt whether to keep extras for that disc before
-#            ripping. Answers "y" to keep (behaves like "keep") or anything else
+#            ripping. Answer "y" to keep (behaves like "keep") or anything else
 #            to skip (behaves like "skip"). Useful when some discs have extras
 #            worth keeping and others don't.
 mode = "skip"
