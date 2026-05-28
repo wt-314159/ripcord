@@ -13,10 +13,10 @@ pub mod uploader;
 
 fn main() -> Result<()> {
     let cli = cli::Cli::parse();
-    let cfg = config::Config::load(&cli)?;
+    let mut cfg = config::Config::load(&cli)?;
 
     match &cli.command {
-        Some(cli::Command::Run(_)) => pipeline::run_loop(&cfg)?,
+        Some(cli::Command::Run(_)) => pipeline::run_loop(&mut cfg)?,
         Some(cli::Command::Encode(args)) => handle_encode(args, &cfg)?,
         Some(cli::Command::Upload(args)) => handle_upload(args, &cfg)?,
         Some(cli::Command::InitConfig { path }) => handle_init_config(path)?,

@@ -26,4 +26,5 @@ pub enum ExtrasMode {
     #[default]
     Skip,
     Keep,
+    Ask,
 }

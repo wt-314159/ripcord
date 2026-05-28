@@ -329,6 +329,31 @@ mod tests {
     }
 
     #[test]
+    fn extras_mode_ask_round_trips_through_toml() {
+        let mut original = Config::default();
+        original.extras.mode = ExtrasMode::Ask;
+        let serialised = toml::to_string_pretty(&original).unwrap();
+        let reloaded: Config = toml::from_str(&serialised).unwrap();
+        assert_eq!(reloaded.extras.mode, ExtrasMode::Ask);
+    }
+
+    #[test]
+    fn toml_loads_extras_mode_ask() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [extras]
+            mode = "ask"
+            encode = true
+            upload = true
+        "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.extras.mode, ExtrasMode::Ask);
+        assert!(cfg.extras.encode);
+        assert!(cfg.extras.upload);
+    }
+
+    #[test]
     fn toml_loads_nested_logging_section() {
         let cfg: Config = toml::from_str(
             r#"

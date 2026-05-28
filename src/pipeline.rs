@@ -17,7 +17,7 @@ pub struct EncodeJob {
     pub encode: bool,
 }
 
-pub fn run_loop(cfg: &Config) -> Result<()> {
+pub fn run_loop(cfg: &mut Config) -> Result<()> {
     if !cfg.upload.no_upload {
         uploader::check_nas_accessible(cfg)?;
     }
@@ -32,6 +32,8 @@ pub fn run_loop(cfg: &Config) -> Result<()> {
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
     let mut input = String::new();
+    let mut keep_extras = String::new();
+    let ask_extras = cfg.extras.mode == ExtrasMode::Ask;
 
     loop {
         print!("Enter movie title (or press Enter to quit): ");
@@ -45,6 +47,23 @@ pub fn run_loop(cfg: &Config) -> Result<()> {
             break;
         }
 
+        if ask_extras {
+            keep_extras.clear();
+            print!("Keep extras? (y/N): ");
+            io::stdout().flush()?;
+            stdin_lock.read_line(&mut keep_extras)?;
+            cfg.extras.mode = if keep_extras.trim().eq_ignore_ascii_case("y") {
+                ExtrasMode::Keep
+            } else {
+                ExtrasMode::Skip
+            };
+        }
+
+        match cfg.extras.mode {
+            ExtrasMode::Keep => println!("Extras will be kept."),
+            ExtrasMode::Skip => println!("Extras will be skipped."),
+            ExtrasMode::Ask => unreachable!("Ask mode is resolved to Keep/Skip before this point"),
+        }
         println!("Ripping '{title}'...");
 
         let min_length = resolve_min_length(&title, cfg);
@@ -156,8 +175,7 @@ fn encode_upload_worker(rx: Receiver<EncodeJob>, cfg: &Config) {
 }
 
 fn process_job(job: &EncodeJob, cfg: &Config) -> Result<()> {
-    let should_upload =
-        !cfg.upload.no_upload && (!job.is_extra || cfg.extras.upload);
+    let should_upload = !cfg.upload.no_upload && (!job.is_extra || cfg.extras.upload);
     // Direct mode: HandBrakeCLI writes the output straight to the NAS path.
     let use_direct = job.encode && should_upload && cfg.upload.direct_to_nas;
 
@@ -209,4 +227,137 @@ fn find_extras(output_dir: &Path, main_feature: &Path) -> Result<Vec<PathBuf>> {
         .filter(|p| p != main_feature)
         .collect();
     Ok(extras)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, ExtrasConfig, UploadConfig};
+    use crate::types::{ExtrasMode, OutputFormat};
+
+    fn cfg_with_extras(mode: ExtrasMode, encode: bool, upload: bool, no_upload: bool) -> Config {
+        let mut cfg = Config::default();
+        cfg.extras = ExtrasConfig { mode, encode, upload, ..Default::default() };
+        cfg.upload = UploadConfig { no_upload, ..Default::default() };
+        cfg
+    }
+
+    // --- should_queue_extras ---
+
+    #[test]
+    fn should_queue_extras_keep_with_encode() {
+        let cfg = cfg_with_extras(ExtrasMode::Keep, true, false, false);
+        assert!(should_queue_extras(&cfg));
+    }
+
+    #[test]
+    fn should_queue_extras_keep_with_upload() {
+        let cfg = cfg_with_extras(ExtrasMode::Keep, false, true, false);
+        assert!(should_queue_extras(&cfg));
+    }
+
+    #[test]
+    fn should_queue_extras_keep_upload_suppressed_by_no_upload() {
+        let cfg = cfg_with_extras(ExtrasMode::Keep, false, true, true);
+        assert!(!should_queue_extras(&cfg));
+    }
+
+    #[test]
+    fn should_queue_extras_keep_neither_encode_nor_upload() {
+        let cfg = cfg_with_extras(ExtrasMode::Keep, false, false, false);
+        assert!(!should_queue_extras(&cfg));
+    }
+
+    #[test]
+    fn should_queue_extras_skip_always_false() {
+        let cfg = cfg_with_extras(ExtrasMode::Skip, true, true, false);
+        assert!(!should_queue_extras(&cfg));
+    }
+
+    #[test]
+    fn should_queue_extras_ask_always_false() {
+        // Ask is resolved to Keep/Skip before should_queue_extras is ever called,
+        // but if somehow called with Ask it should safely return false.
+        let cfg = cfg_with_extras(ExtrasMode::Ask, true, true, false);
+        assert!(!should_queue_extras(&cfg));
+    }
+
+    // --- local_encode_path ---
+
+    fn cfg_with_format(fmt: OutputFormat) -> Config {
+        let mut cfg = Config::default();
+        cfg.handbrake.output_format = fmt;
+        cfg
+    }
+
+    #[test]
+    fn local_encode_path_main_feature_uses_sanitized_title() {
+        let cfg = cfg_with_format(OutputFormat::Mkv);
+        let mkv = std::path::Path::new("/tmp/rips/Batman__The_Dark_Knight/title_t00.mkv");
+        let result = local_encode_path(mkv, "Batman: The Dark Knight", false, &cfg);
+        assert_eq!(result, std::path::Path::new("/tmp/rips/Batman__The_Dark_Knight/Batman_ The Dark Knight.mkv"));
+    }
+
+    #[test]
+    fn local_encode_path_main_feature_respects_output_format() {
+        let cfg = cfg_with_format(OutputFormat::Mp4);
+        let mkv = std::path::Path::new("/tmp/rips/The_Matrix/title_t00.mkv");
+        let result = local_encode_path(mkv, "The Matrix", false, &cfg);
+        // sanitize_filename preserves spaces, so "The Matrix" stays "The Matrix"
+        assert_eq!(result, std::path::Path::new("/tmp/rips/The_Matrix/The Matrix.mp4"));
+    }
+
+    #[test]
+    fn local_encode_path_extra_uses_source_stem() {
+        let cfg = cfg_with_format(OutputFormat::Mkv);
+        let mkv = std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mkv");
+        let result = local_encode_path(mkv, "The Matrix", true, &cfg);
+        assert_eq!(result, std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mkv"));
+    }
+
+    #[test]
+    fn local_encode_path_extra_updates_extension() {
+        let cfg = cfg_with_format(OutputFormat::Mp4);
+        let mkv = std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mkv");
+        let result = local_encode_path(mkv, "The Matrix", true, &cfg);
+        assert_eq!(result, std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mp4"));
+    }
+
+    // --- find_extras ---
+
+    #[test]
+    fn find_extras_excludes_main_feature() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("title_t00.mkv");
+        fs::write(&main, b"main").unwrap();
+        fs::write(dir.path().join("title_t01.mkv"), b"extra1").unwrap();
+        fs::write(dir.path().join("title_t02.mkv"), b"extra2").unwrap();
+
+        let mut extras = find_extras(dir.path(), &main).unwrap();
+        extras.sort();
+        assert_eq!(extras.len(), 2);
+        assert!(!extras.iter().any(|p| p == &main));
+    }
+
+    #[test]
+    fn find_extras_returns_empty_when_only_main() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("title_t00.mkv");
+        fs::write(&main, b"main").unwrap();
+
+        let extras = find_extras(dir.path(), &main).unwrap();
+        assert!(extras.is_empty());
+    }
+
+    #[test]
+    fn find_extras_ignores_non_mkv_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("title_t00.mkv");
+        fs::write(&main, b"main").unwrap();
+        fs::write(dir.path().join("notes.txt"), b"text").unwrap();
+        fs::write(dir.path().join("thumb.jpg"), b"img").unwrap();
+
+        let extras = find_extras(dir.path(), &main).unwrap();
+        assert!(extras.is_empty());
+    }
 }
