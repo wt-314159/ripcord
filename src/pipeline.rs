@@ -204,7 +204,7 @@ fn process_job(job: &EncodeJob, cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-fn delete_rip_file(mkv_path: &Path) {
+pub(crate) fn delete_rip_file(mkv_path: &Path) {
     match fs::remove_file(mkv_path) {
         Err(e) => eprintln!(
             "[worker] Warning: could not delete rip '{}': {e}",

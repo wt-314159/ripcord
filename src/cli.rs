@@ -63,6 +63,9 @@ pub struct RunArgs {
     /// Write HandBrakeCLI output to this file for this run (overrides config)
     #[arg(long)]
     pub hb_log_file: Option<PathBuf>,
+    /// Delete the original ripped MKV after successful encoding/upload (overrides config)
+    #[arg(long)]
+    pub delete_rips: Option<bool>,
 }
 
 #[derive(Parser, Debug)]
@@ -93,6 +96,9 @@ pub struct EncodeArgs {
     /// Write HandBrakeCLI output to this file for this run (overrides config)
     #[arg(long)]
     pub hb_log_file: Option<PathBuf>,
+    /// Delete the original MKV after successful encoding/upload (overrides config)
+    #[arg(long)]
+    pub delete_rips: Option<bool>,
 }
 
 #[derive(Parser, Debug)]
@@ -105,4 +111,7 @@ pub struct UploadArgs {
     /// Treat this file as an extra (uploads to <title>/extras/ instead of <title>/)
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub extra: bool,
+    /// Delete the source file after successful upload (overrides config)
+    #[arg(long)]
+    pub delete_rips: Option<bool>,
 }

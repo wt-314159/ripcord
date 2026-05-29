@@ -7,7 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{Cli, Command, EncodeArgs, RunArgs};
+use crate::cli::{Cli, Command, EncodeArgs, RunArgs, UploadArgs};
 use crate::types::{ExtrasMode, OutputFormat};
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -164,6 +164,7 @@ impl Config {
         match &cli.command {
             Some(Command::Run(args)) => cfg.apply_run_overrides(args),
             Some(Command::Encode(args)) => cfg.apply_encode_overrides(args),
+            Some(Command::Upload(args)) => cfg.apply_upload_overrides(args),
             _ => {}
         }
 
@@ -191,6 +192,7 @@ impl Config {
         apply_override(&args.hb_log_file, |v| {
             self.handbrake.logging.log_file = Some(v)
         });
+        apply_override(&args.delete_rips, |v| self.cleanup.delete_rips = v);
     }
 
     fn apply_encode_overrides(&mut self, args: &EncodeArgs) {
@@ -203,9 +205,12 @@ impl Config {
         apply_override(&args.hb_log_file, |v| {
             self.handbrake.logging.log_file = Some(v)
         });
-        if args.no_upload {
-            self.upload.no_upload = true;
-        }
+        if args.no_upload { self.upload.no_upload = true; }
+        apply_override(&args.delete_rips, |v| self.cleanup.delete_rips = v);
+    }
+
+    fn apply_upload_overrides(&mut self, args: &UploadArgs) {
+        apply_override(&args.delete_rips, |v| self.cleanup.delete_rips = v);
     }
 }
 
@@ -256,6 +261,7 @@ mod tests {
             output_format: None,
             mkv_log_file: None,
             hb_log_file: None,
+            delete_rips: None,
         }
     }
 
@@ -270,6 +276,23 @@ mod tests {
             hb_args: None,
             output_format: None,
             hb_log_file: None,
+            delete_rips: None,
+        }
+    }
+
+    fn bare_upload_args() -> cli::UploadArgs {
+        cli::UploadArgs {
+            input: "/tmp/test.mkv".into(),
+            title: None,
+            extra: false,
+            delete_rips: None,
+        }
+    }
+
+    fn cli_upload(args: cli::UploadArgs) -> Cli {
+        Cli {
+            config: None,
+            command: Some(Command::Upload(args)),
         }
     }
 
@@ -621,5 +644,62 @@ mod tests {
             cfg.handbrake.logging.log_file,
             Some(PathBuf::from("/tmp/handbrake.log"))
         );
+    }
+
+    // --- CLI delete_rips overrides ---
+
+    #[test]
+    fn run_delete_rips_false_disables_cleanup() {
+        let mut args = bare_run_args();
+        args.delete_rips = Some(false);
+        let cfg = Config::load(&cli_run(args)).unwrap();
+        assert!(!cfg.cleanup.delete_rips);
+    }
+
+    #[test]
+    fn run_delete_rips_true_enables_cleanup() {
+        let mut args = bare_run_args();
+        args.delete_rips = Some(true);
+        let cfg = Config::load(&cli_run(args)).unwrap();
+        assert!(cfg.cleanup.delete_rips);
+    }
+
+    #[test]
+    fn run_delete_rips_none_leaves_config_unchanged() {
+        // No CLI flag — config default (true) should be respected.
+        let cfg = Config::load(&cli_run(bare_run_args())).unwrap();
+        assert!(cfg.cleanup.delete_rips);
+    }
+
+    #[test]
+    fn encode_delete_rips_false_disables_cleanup() {
+        let mut args = bare_encode_args();
+        args.delete_rips = Some(false);
+        let cfg = Config::load(&cli_encode(args)).unwrap();
+        assert!(!cfg.cleanup.delete_rips);
+    }
+
+    #[test]
+    fn encode_delete_rips_true_enables_cleanup() {
+        let mut args = bare_encode_args();
+        args.delete_rips = Some(true);
+        let cfg = Config::load(&cli_encode(args)).unwrap();
+        assert!(cfg.cleanup.delete_rips);
+    }
+
+    #[test]
+    fn upload_delete_rips_false_disables_cleanup() {
+        let mut args = bare_upload_args();
+        args.delete_rips = Some(false);
+        let cfg = Config::load(&cli_upload(args)).unwrap();
+        assert!(!cfg.cleanup.delete_rips);
+    }
+
+    #[test]
+    fn upload_delete_rips_true_enables_cleanup() {
+        let mut args = bare_upload_args();
+        args.delete_rips = Some(true);
+        let cfg = Config::load(&cli_upload(args)).unwrap();
+        assert!(cfg.cleanup.delete_rips);
     }
 }

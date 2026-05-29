@@ -50,6 +50,10 @@ fn handle_encode(args: &cli::EncodeArgs, cfg: &config::Config) -> Result<()> {
         println!("Uploaded to: {}", dest.display());
     }
 
+    if cfg.cleanup.delete_rips {
+        pipeline::delete_rip_file(&args.input);
+    }
+
     Ok(())
 }
 
@@ -63,6 +67,11 @@ fn handle_upload(args: &cli::UploadArgs, cfg: &config::Config) -> Result<()> {
     uploader::check_nas_accessible(cfg)?;
     let dest = uploader::upload_file(&args.input, &title, args.extra, cfg)?;
     println!("Uploaded to: {}", dest.display());
+
+    if cfg.cleanup.delete_rips {
+        pipeline::delete_rip_file(&args.input);
+    }
+
     Ok(())
 }
 
