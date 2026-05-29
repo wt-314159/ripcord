@@ -25,16 +25,21 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config) -> Result<()> {
     let mut child = cmd.spawn()?;
     let stdout = child.stdout.take().expect("stdout was piped");
 
-    let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("encode");
-    let log_path = cfg.handbrake.logging.get_log_file(stem);
-    let mut log_writer: Option<BufWriter<File>> = log_path
-        .as_ref()
-        .map(|p| {
-            Ok::<_, anyhow::Error>(BufWriter::new(
-                OpenOptions::new().create(true).append(true).open(p)?,
-            ))
-        })
-        .transpose()?;
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("encode");
+    let log_path = dbg!(cfg.handbrake.logging.get_log_file(stem));
+    let mut log_writer: Option<BufWriter<File>> = dbg!(
+        log_path
+            .as_ref()
+            .map(|p| {
+                Ok::<_, anyhow::Error>(BufWriter::new(dbg!(
+                    OpenOptions::new().create(true).append(true).open(p)?
+                )))
+            })
+            .transpose()?
+    );
 
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
@@ -77,7 +82,7 @@ fn process_line(line: &str, log_writer: &mut Option<BufWriter<File>>, cfg: &Conf
     } else if let Some(writer) = log_writer {
         writeln!(writer, "{line}")?;
     } else {
-        println!("{line}");
+        println!("Writer was None, line: {line}");
     }
     Ok(())
 }

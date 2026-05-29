@@ -197,7 +197,27 @@ fn process_job(job: &EncodeJob, cfg: &Config) -> Result<()> {
         println!("[worker] Uploaded: {}", dest.display());
     }
 
+    if cfg.cleanup.delete_rips && (job.encode || should_upload) {
+        delete_rip_file(&job.mkv_path);
+    }
+
     Ok(())
+}
+
+fn delete_rip_file(mkv_path: &Path) {
+    match fs::remove_file(mkv_path) {
+        Err(e) => eprintln!(
+            "[worker] Warning: could not delete rip '{}': {e}",
+            mkv_path.display()
+        ),
+        Ok(()) => {
+            println!("[worker] Deleted rip: {}", mkv_path.display());
+            if let Some(parent) = mkv_path.parent() {
+                // Best-effort: remove the directory only if it is now empty.
+                let _ = fs::remove_dir(parent);
+            }
+        }
+    }
 }
 
 /// Local path HandBrakeCLI writes to when not using direct-to-NAS mode.
@@ -341,6 +361,47 @@ mod tests {
             result,
             std::path::Path::new("/tmp/rips/The_Matrix/title_t02.mp4")
         );
+    }
+
+    // --- delete_rip_file ---
+
+    #[test]
+    fn delete_rip_file_removes_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mkv = dir.path().join("title_t00.mkv");
+        fs::write(&mkv, b"data").unwrap();
+
+        delete_rip_file(&mkv);
+        assert!(!mkv.exists());
+    }
+
+    #[test]
+    fn delete_rip_file_removes_parent_dir_when_empty() {
+        let root = tempfile::tempdir().unwrap();
+        let sub = root.path().join("The Matrix");
+        fs::create_dir(&sub).unwrap();
+        let mkv = sub.join("title_t00.mkv");
+        fs::write(&mkv, b"data").unwrap();
+
+        delete_rip_file(&mkv);
+        assert!(!mkv.exists());
+        assert!(!sub.exists(), "empty rip directory should be removed");
+    }
+
+    #[test]
+    fn delete_rip_file_leaves_parent_dir_when_not_empty() {
+        let root = tempfile::tempdir().unwrap();
+        let sub = root.path().join("The Matrix");
+        fs::create_dir(&sub).unwrap();
+        let mkv = sub.join("title_t00.mkv");
+        let extra = sub.join("title_t01.mkv");
+        fs::write(&mkv, b"main").unwrap();
+        fs::write(&extra, b"extra").unwrap();
+
+        delete_rip_file(&mkv);
+        assert!(!mkv.exists());
+        assert!(sub.exists(), "non-empty rip directory should remain");
+        assert!(extra.exists());
     }
 
     // --- find_extras ---

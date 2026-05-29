@@ -18,6 +18,7 @@ pub struct Config {
     pub handbrake: HandBrakeConfig,
     pub upload: UploadConfig,
     pub extras: ExtrasConfig,
+    pub cleanup: CleanupConfig,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -138,6 +139,18 @@ impl Default for ExtrasConfig {
             upload: false,
             folder_name: String::from("extras"),
         }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct CleanupConfig {
+    pub delete_rips: bool,
+}
+
+impl Default for CleanupConfig {
+    fn default() -> Self {
+        Self { delete_rips: true }
     }
 }
 
@@ -282,6 +295,7 @@ mod tests {
         assert!(cfg.makemkv.logging.log_dir.is_none());
         assert!(cfg.handbrake.logging.log_dir.is_none());
         assert!(cfg.paths.nas_mount.is_none());
+        assert!(cfg.cleanup.delete_rips);
     }
 
     // --- TOML loading ---
@@ -538,6 +552,24 @@ mod tests {
             name.starts_with("Inception_"),
             "expected 'Inception_…', got '{name}'"
         );
+    }
+
+    #[test]
+    fn cleanup_delete_rips_defaults_to_true() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert!(cfg.cleanup.delete_rips);
+    }
+
+    #[test]
+    fn cleanup_delete_rips_can_be_disabled() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [cleanup]
+            delete_rips = false
+        "#,
+        )
+        .unwrap();
+        assert!(!cfg.cleanup.delete_rips);
     }
 
     #[test]

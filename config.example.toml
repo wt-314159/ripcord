@@ -105,6 +105,14 @@ no_upload = false
 direct_to_nas = false
 
 
+[cleanup]
+# Delete the ripped MKV file from output_dir after a successful encode or upload.
+# The rip directory is also removed if it is empty after deletion.
+# Set to false to keep all ripped MKVs (useful for debugging or re-encoding with
+# different settings without re-ripping).
+delete_rips = true
+
+
 [extras]
 # How non-main-feature titles on the disc are handled.
 #
