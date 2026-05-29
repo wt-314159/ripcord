@@ -17,16 +17,31 @@ pub struct EncodeJob {
     pub encode: bool,
 }
 
+struct UploadJob {
+    title: String,
+    /// The file to upload (encoded output, or the raw MKV when encode=false).
+    encoded_path: PathBuf,
+    /// The original ripped MKV; deleted by the upload worker after a successful upload.
+    mkv_path: PathBuf,
+    is_extra: bool,
+}
+
 pub fn run_loop(cfg: &mut Config) -> Result<()> {
     if !cfg.upload.no_upload {
         uploader::check_nas_accessible(cfg)?;
     }
 
-    let (tx, rx) = mpsc::channel::<EncodeJob>();
+    let (encode_tx, encode_rx) = mpsc::channel::<EncodeJob>();
+    let (upload_tx, upload_rx) = mpsc::channel::<UploadJob>();
 
-    let cfg_clone = cfg.clone();
-    let worker = thread::spawn(move || {
-        encode_upload_worker(rx, &cfg_clone);
+    let cfg_for_encode = cfg.clone();
+    let encode_worker = thread::spawn(move || {
+        run_encode_worker(encode_rx, upload_tx, &cfg_for_encode);
+    });
+
+    let cfg_for_upload = cfg.clone();
+    let upload_worker = thread::spawn(move || {
+        run_upload_worker(upload_rx, &cfg_for_upload);
     });
 
     let stdin = io::stdin();
@@ -72,29 +87,32 @@ pub fn run_loop(cfg: &mut Config) -> Result<()> {
             Err(e) => eprintln!("Rip failed for '{title}': {e}"),
             Ok(main_feature) => {
                 println!(
-                    "Rip complete — encoding is happening in the background, you can swap the disc."
+                    "Rip complete — encoding and uploading are happening in the background, you can swap the disc."
                 );
 
-                tx.send(EncodeJob {
+                encode_tx.send(EncodeJob {
                     title: title.clone(),
                     mkv_path: main_feature.clone(),
                     is_extra: false,
                     encode: true,
                 })
-                .expect("encode/upload worker stopped unexpectedly");
+                .expect("encode worker stopped unexpectedly");
 
                 if should_queue_extras(cfg) {
                     if let Some(parent) = main_feature.parent() {
-                        queue_extras(parent, &main_feature, &title, &tx, cfg);
+                        queue_extras(parent, &main_feature, &title, &encode_tx, cfg);
                     }
                 }
             }
         }
     }
 
-    // Dropping tx closes the channel, which causes the worker's `for job in rx` loop to exit.
-    drop(tx);
-    worker.join().expect("encode/upload worker panicked");
+    // Dropping encode_tx closes the encode channel. The encode worker exits its loop, which
+    // drops upload_tx (owned by the encode worker closure), closing the upload channel and
+    // causing the upload worker to exit too.
+    drop(encode_tx);
+    encode_worker.join().expect("encode worker panicked");
+    upload_worker.join().expect("upload worker panicked");
     println!("All done.");
     Ok(())
 }
@@ -156,25 +174,20 @@ fn queue_extras(
     }
 }
 
-fn encode_upload_worker(rx: Receiver<EncodeJob>, cfg: &Config) {
+fn run_encode_worker(rx: Receiver<EncodeJob>, upload_tx: Sender<UploadJob>, cfg: &Config) {
     for job in rx {
-        let label = if job.is_extra {
-            format!("'{}' (extra)", job.title)
+        let label = job_label(&job.title, job.is_extra);
+        println!("[encode] Processing {label}...");
+        if let Err(e) = process_encode(&job, &upload_tx, cfg) {
+            eprintln!("[encode] Failed {label}: {e}");
         } else {
-            format!("'{}'", job.title)
-        };
-
-        println!("[worker] Processing {label}...");
-
-        if let Err(e) = process_job(&job, cfg) {
-            eprintln!("[worker] Failed to process {label}: {e}");
-        } else {
-            println!("[worker] Finished {label}.");
+            println!("[encode] Done {label}.");
         }
     }
+    // Dropping upload_tx here closes the upload channel, signalling the upload worker to exit.
 }
 
-fn process_job(job: &EncodeJob, cfg: &Config) -> Result<()> {
+fn process_encode(job: &EncodeJob, upload_tx: &Sender<UploadJob>, cfg: &Config) -> Result<()> {
     let should_upload = !cfg.upload.no_upload && (!job.is_extra || cfg.extras.upload);
     // Direct mode: HandBrakeCLI writes the output straight to the NAS path.
     let use_direct = job.encode && should_upload && cfg.upload.direct_to_nas;
@@ -188,30 +201,63 @@ fn process_job(job: &EncodeJob, cfg: &Config) -> Result<()> {
         encoder::encode(&job.mkv_path, &output, cfg)?;
         output
     } else {
-        // No encoding requested — pass the raw MKV through to the upload step.
+        // No encoding — pass the raw MKV through to the upload step.
         job.mkv_path.clone()
     };
 
     if should_upload && !use_direct {
-        let dest = uploader::upload_file(&encoded_path, &job.title, job.is_extra, cfg)?;
-        println!("[worker] Uploaded: {}", dest.display());
-    }
-
-    if cfg.cleanup.delete_rips && (job.encode || should_upload) {
-        delete_rip_file(&job.mkv_path);
+        // Hand off to the upload worker; it is responsible for cleanup.
+        upload_tx
+            .send(UploadJob {
+                title: job.title.clone(),
+                encoded_path,
+                mkv_path: job.mkv_path.clone(),
+                is_extra: job.is_extra,
+            })
+            .expect("upload worker stopped unexpectedly");
+    } else {
+        // No upload step — clean up here (direct-to-NAS already wrote to the NAS,
+        // or upload is disabled; either way the rip is no longer needed if we encoded).
+        if cfg.cleanup.delete_rips && job.encode {
+            delete_rip_file(&job.mkv_path);
+        }
     }
 
     Ok(())
 }
 
+fn run_upload_worker(rx: Receiver<UploadJob>, cfg: &Config) {
+    for job in rx {
+        let label = job_label(&job.title, job.is_extra);
+        println!("[upload] Uploading {label}...");
+        match uploader::upload_file(&job.encoded_path, &job.title, job.is_extra, cfg) {
+            Err(e) => eprintln!("[upload] Failed {label}: {e}"),
+            Ok(dest) => {
+                println!("[upload] Uploaded {label} to: {}", dest.display());
+                if cfg.cleanup.delete_rips {
+                    delete_rip_file(&job.mkv_path);
+                }
+            }
+        }
+    }
+}
+
+fn job_label(title: &str, is_extra: bool) -> String {
+    if is_extra {
+        format!("'{title}' (extra)")
+    } else {
+        format!("'{title}'")
+    }
+}
+
 pub(crate) fn delete_rip_file(mkv_path: &Path) {
     match fs::remove_file(mkv_path) {
         Err(e) => eprintln!(
-            "[worker] Warning: could not delete rip '{}': {e}",
+            "Warning: could not delete rip '{}': {e}",
             mkv_path.display()
         ),
         Ok(()) => {
-            println!("[worker] Deleted rip: {}", mkv_path.display());
+            println!("Deleted rip: {}", mkv_path.display());
             if let Some(parent) = mkv_path.parent() {
                 // Best-effort: remove the directory only if it is now empty.
                 let _ = fs::remove_dir(parent);
