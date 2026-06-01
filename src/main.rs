@@ -1,7 +1,9 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::Arc};
 
 use anyhow::Result;
 use clap::Parser;
+
+use crate::ui::Ui;
 
 pub mod cli;
 pub mod config;
@@ -9,6 +11,7 @@ pub mod encoder;
 pub mod pipeline;
 pub mod ripper;
 pub mod types;
+pub mod ui;
 pub mod uploader;
 
 fn main() -> Result<()> {
@@ -42,7 +45,8 @@ fn handle_encode(args: &cli::EncodeArgs, cfg: &config::Config) -> Result<()> {
             .join(format!("{}.{ext}", stem.to_string_lossy()))
     });
 
-    encoder::encode(&args.input, &output, cfg)?;
+    let ui = Arc::new(Ui::new());
+    encoder::encode(&args.input, &output, cfg, &ui)?;
 
     if !cfg.upload.no_upload {
         uploader::check_nas_accessible(cfg)?;

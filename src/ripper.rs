@@ -76,7 +76,10 @@ pub fn sanitize_filename(title: &str) -> String {
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric()
-                || matches!(c, ' ' | '.' | '_' | '-' | '(' | ')' | '\'' | '!' | '[' | ']')
+                || matches!(
+                    c,
+                    ' ' | '.' | '_' | '-' | '(' | ')' | '\'' | '!' | '[' | ']'
+                )
             {
                 c
             } else {
@@ -112,17 +115,18 @@ fn parse_disc_info(output: &str) -> Vec<DiscTitle> {
         };
 
         let mut fields = rest.splitn(4, ',');
-        let (Some(id_s), Some(attr_s), Some(_), Some(val_s)) = (
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-        ) else {
+        let (Some(id_s), Some(attr_s), Some(_), Some(val_s)) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
             continue;
         };
 
-        let Ok(title_id) = id_s.parse::<u32>() else { continue };
-        let Ok(attr_id) = attr_s.parse::<u32>() else { continue };
+        let Ok(title_id) = id_s.parse::<u32>() else {
+            continue;
+        };
+        let Ok(attr_id) = attr_s.parse::<u32>() else {
+            continue;
+        };
         if attr_id != ATTR_DURATION {
             continue;
         }
@@ -134,7 +138,10 @@ fn parse_disc_info(output: &str) -> Vec<DiscTitle> {
 
     let mut titles: Vec<DiscTitle> = durations
         .into_iter()
-        .map(|(id, duration_seconds)| DiscTitle { id, duration_seconds })
+        .map(|(id, duration_seconds)| DiscTitle {
+            id,
+            duration_seconds,
+        })
         .collect();
     titles.sort_by_key(|t| t.id);
     titles
@@ -227,7 +234,10 @@ mod tests {
 
     #[test]
     fn sanitize_preserves_numbers_and_dots() {
-        assert_eq!(sanitize_filename("2001. A Space Odyssey"), "2001. A Space Odyssey");
+        assert_eq!(
+            sanitize_filename("2001. A Space Odyssey"),
+            "2001. A Space Odyssey"
+        );
     }
 
     // --- parse_duration ---
@@ -272,9 +282,18 @@ mod tests {
     #[test]
     fn smart_min_length_subtracts_60_from_max() {
         let titles = vec![
-            DiscTitle { id: 0, duration_seconds: 300 },
-            DiscTitle { id: 1, duration_seconds: 7305 },
-            DiscTitle { id: 2, duration_seconds: 600 },
+            DiscTitle {
+                id: 0,
+                duration_seconds: 300,
+            },
+            DiscTitle {
+                id: 1,
+                duration_seconds: 7305,
+            },
+            DiscTitle {
+                id: 2,
+                duration_seconds: 600,
+            },
         ];
         assert_eq!(smart_min_length_seconds(&titles), Some(7245));
     }
@@ -287,13 +306,19 @@ mod tests {
     #[test]
     fn smart_min_length_saturates_at_zero() {
         // A very short disc shouldn't produce an underflowing value.
-        let titles = vec![DiscTitle { id: 0, duration_seconds: 30 }];
+        let titles = vec![DiscTitle {
+            id: 0,
+            duration_seconds: 30,
+        }];
         assert_eq!(smart_min_length_seconds(&titles), Some(0));
     }
 
     #[test]
     fn smart_min_length_single_title() {
-        let titles = vec![DiscTitle { id: 0, duration_seconds: 7200 }];
+        let titles = vec![DiscTitle {
+            id: 0,
+            duration_seconds: 7200,
+        }];
         assert_eq!(smart_min_length_seconds(&titles), Some(7140));
     }
 

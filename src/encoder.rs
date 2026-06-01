@@ -3,12 +3,13 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     path::Path,
     process::{Command, Stdio},
+    sync::Arc,
 };
 
-use crate::config::Config;
+use crate::{config::Config, ui::Ui};
 use anyhow::Result;
 
-pub fn encode(input: &Path, output: &Path, cfg: &Config) -> Result<()> {
+pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result<()> {
     let mut cmd = Command::new("HandBrakeCLI");
     cmd.arg("-i").arg(input);
     cmd.arg("-o").arg(output);
@@ -50,7 +51,7 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config) -> Result<()> {
             Ok(0) => break,
             Ok(_) => {
                 let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-                process_line(trimmed, &mut log_writer, cfg)?;
+                process_line(trimmed, &mut log_writer, cfg, &ui)?;
             }
             Err(e) => return Err(e.into()),
         }
@@ -70,19 +71,23 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-fn process_line(line: &str, log_writer: &mut Option<BufWriter<File>>, cfg: &Config) -> Result<()> {
+fn process_line(
+    line: &str,
+    log_writer: &mut Option<BufWriter<File>>,
+    cfg: &Config,
+    ui: &Arc<Ui>,
+) -> Result<()> {
     if is_progress_line(line) {
-        if cfg.handbrake.logging.show_progress {
-            if let Some(pct) = parse_progress_pct(line) {
-                print!("\rEncoding: {pct:.1}%   ");
-                std::io::stdout().flush()?;
-            }
+        if cfg.handbrake.logging.show_progress
+            && let Some(pct) = parse_progress_pct(line)
+        {
+            ui.println(&format!("Encoding: {pct:.1}%   "))?;
         }
         // Progress lines are not written to the log — they're too noisy.
     } else if let Some(writer) = log_writer {
         writeln!(writer, "{line}")?;
     } else {
-        println!("Writer was None, line: {line}");
+        ui.println(&format!("Writer was None, line: {line}"))?;
     }
     Ok(())
 }

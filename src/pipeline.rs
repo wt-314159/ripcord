@@ -1,12 +1,14 @@
 use std::{
     fs,
-    io::{self, BufRead, Write},
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, Sender},
+    },
     thread,
 };
 
-use crate::{config::Config, encoder, ripper, types::ExtrasMode, uploader};
+use crate::{config::Config, encoder, ripper, types::ExtrasMode, ui::Ui, uploader};
 use anyhow::Result;
 
 pub struct EncodeJob {
@@ -34,9 +36,11 @@ pub fn run_loop(cfg: &mut Config) -> Result<()> {
     let (encode_tx, encode_rx) = mpsc::channel::<EncodeJob>();
     let (upload_tx, upload_rx) = mpsc::channel::<UploadJob>();
 
+    let ui = Arc::new(Ui::new());
+    let ui_for_encode = ui.clone();
     let cfg_for_encode = cfg.clone();
     let encode_worker = thread::spawn(move || {
-        run_encode_worker(encode_rx, upload_tx, &cfg_for_encode);
+        run_encode_worker(encode_rx, upload_tx, &cfg_for_encode, ui_for_encode);
     });
 
     let cfg_for_upload = cfg.clone();
@@ -44,29 +48,18 @@ pub fn run_loop(cfg: &mut Config) -> Result<()> {
         run_upload_worker(upload_rx, &cfg_for_upload);
     });
 
-    let stdin = io::stdin();
-    let mut stdin_lock = stdin.lock();
-    let mut input = String::new();
-    let mut keep_extras = String::new();
     let ask_extras = cfg.extras.mode == ExtrasMode::Ask;
 
     loop {
-        print!("Enter movie title (or press Enter to quit): ");
-        io::stdout().flush()?;
-
-        input.clear();
-        stdin_lock.read_line(&mut input)?;
-        let title = input.trim().to_string();
+        let title = ui.prompt("Enter movie title (or press Enter to quit): ")?;
 
         if title.is_empty() {
             break;
         }
 
         if ask_extras {
-            keep_extras.clear();
-            print!("Keep extras? (y/N): ");
-            io::stdout().flush()?;
-            stdin_lock.read_line(&mut keep_extras)?;
+            let keep_extras = ui.prompt("Keep extras? (y/N): ")?;
+
             cfg.extras.mode = if keep_extras.trim().eq_ignore_ascii_case("y") {
                 ExtrasMode::Keep
             } else {
@@ -75,28 +68,29 @@ pub fn run_loop(cfg: &mut Config) -> Result<()> {
         }
 
         match cfg.extras.mode {
-            ExtrasMode::Keep => println!("Extras will be kept."),
-            ExtrasMode::Skip => println!("Extras will be skipped."),
+            ExtrasMode::Keep => ui.println("Extras will be kept.")?,
+            ExtrasMode::Skip => ui.println("Extras will be skipped.")?,
             ExtrasMode::Ask => unreachable!("Ask mode is resolved to Keep/Skip before this point"),
         }
-        println!("Ripping '{title}'...");
+        ui.println("Ripping '{title}'...")?;
 
         let min_length = resolve_min_length(&title, cfg);
 
         match ripper::rip_disc(&title, min_length, cfg) {
             Err(e) => eprintln!("Rip failed for '{title}': {e}"),
             Ok(main_feature) => {
-                println!(
-                    "Rip complete — encoding and uploading are happening in the background, you can swap the disc."
-                );
+                ui.println(
+                    "Rip complete — encoding and uploading are happening in the background, you can swap the disc.",
+                )?;
 
-                encode_tx.send(EncodeJob {
-                    title: title.clone(),
-                    mkv_path: main_feature.clone(),
-                    is_extra: false,
-                    encode: true,
-                })
-                .expect("encode worker stopped unexpectedly");
+                encode_tx
+                    .send(EncodeJob {
+                        title: title.clone(),
+                        mkv_path: main_feature.clone(),
+                        is_extra: false,
+                        encode: true,
+                    })
+                    .expect("encode worker stopped unexpectedly");
 
                 if should_queue_extras(cfg) {
                     if let Some(parent) = main_feature.parent() {
@@ -174,20 +168,30 @@ fn queue_extras(
     }
 }
 
-fn run_encode_worker(rx: Receiver<EncodeJob>, upload_tx: Sender<UploadJob>, cfg: &Config) {
+fn run_encode_worker(
+    rx: Receiver<EncodeJob>,
+    upload_tx: Sender<UploadJob>,
+    cfg: &Config,
+    ui: Arc<Ui>,
+) {
     for job in rx {
         let label = job_label(&job.title, job.is_extra);
-        println!("[encode] Processing {label}...");
-        if let Err(e) = process_encode(&job, &upload_tx, cfg) {
+        ui.println(&format!("[encode] Processing {label}...")).ok();
+        if let Err(e) = process_encode(&job, &upload_tx, cfg, &ui) {
             eprintln!("[encode] Failed {label}: {e}");
         } else {
-            println!("[encode] Done {label}.");
+            ui.println(&format!("[encode] Done {label}.")).ok();
         }
     }
     // Dropping upload_tx here closes the upload channel, signalling the upload worker to exit.
 }
 
-fn process_encode(job: &EncodeJob, upload_tx: &Sender<UploadJob>, cfg: &Config) -> Result<()> {
+fn process_encode(
+    job: &EncodeJob,
+    upload_tx: &Sender<UploadJob>,
+    cfg: &Config,
+    ui: &Arc<Ui>,
+) -> Result<()> {
     let should_upload = !cfg.upload.no_upload && (!job.is_extra || cfg.extras.upload);
     // Direct mode: HandBrakeCLI writes the output straight to the NAS path.
     let use_direct = job.encode && should_upload && cfg.upload.direct_to_nas;
@@ -198,7 +202,8 @@ fn process_encode(job: &EncodeJob, upload_tx: &Sender<UploadJob>, cfg: &Config) 
         } else {
             local_encode_path(&job.mkv_path, &job.title, job.is_extra, cfg)
         };
-        encoder::encode(&job.mkv_path, &output, cfg)?;
+
+        encoder::encode(&job.mkv_path, &output, cfg, ui)?;
         output
     } else {
         // No encoding — pass the raw MKV through to the upload step.
