@@ -3,7 +3,8 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     path::Path,
     process::{Command, Stdio},
-    sync::Arc,
+    sync::{Arc, Mutex},
+    thread,
 };
 
 use crate::{config::Config, ui::Ui};
@@ -20,17 +21,19 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
     cmd.arg("--preset").arg(&cfg.handbrake.preset);
     cmd.args(&cfg.handbrake.extra_args);
 
-    // Pipe stdout so we can parse progress; stderr inherits (HandBrake error messages stay visible).
-    cmd.stdout(Stdio::piped());
-
-    let mut child = cmd.spawn()?;
-    let stdout = child.stdout.take().expect("stdout was piped");
-
     let stem = input
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("encode");
     let log_path = dbg!(cfg.handbrake.logging.get_log_file(stem));
+    let mut log_file = log_path
+        .as_ref()
+        .map(|p| {
+            Ok::<_, anyhow::Error>(Arc::new(Mutex::new(BufWriter::new(
+                OpenOptions::new().create(true).append(true).open(p)?,
+            ))))
+        })
+        .transpose()?;
     let mut log_writer: Option<BufWriter<File>> = dbg!(
         log_path
             .as_ref()
@@ -42,20 +45,51 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
             .transpose()?
     );
 
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
+    // Pipe stdout so we can parse progress; stderr is piped to the log file if enabled.
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
 
-    loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_) => {
-                let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-                process_line(trimmed, &mut log_writer, cfg, &ui)?;
+    let mut child = cmd.spawn()?;
+
+    let mut stdout_reader = BufReader::new(child.stdout.take().expect("stdout was piped"));
+    let mut stderr_reader = BufReader::new(child.stderr.take().expect("stdout was piped"));
+
+    let stdout_cfg = cfg.clone();
+    let stderr_cfg = cfg.clone();
+
+    let stdout_ui = ui.clone();
+    let stderr_ui = ui.clone();
+
+    let mut log_stdout = log_file.as_ref().map(Arc::clone);
+    let stdout_thread = thread::spawn(move || {
+        for line in stdout_reader.lines() {
+            match line {
+                Ok(line) if line.len() == 0 => break,
+                Ok(line) => {
+                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+                    process_line(trimmed, &mut log_stdout, &stdout_cfg, &stdout_ui);
+                }
+                Err(e) => break,
             }
-            Err(e) => return Err(e.into()),
         }
-    }
+    });
+
+    let mut log_stderr = log_file.map(|f| f.clone());
+    let stderr_thread = thread::spawn(move || {
+        for line in stderr_reader.lines() {
+            match line {
+                Ok(line) if line.len() == 0 => break,
+                Ok(line) => {
+                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+                    process_line(trimmed, &mut log_stderr, &stderr_cfg, &stderr_ui);
+                }
+                Err(e) => break,
+            }
+        }
+    });
+
+    stdout_thread.join().unwrap();
+    stderr_thread.join().unwrap();
 
     // Move the cursor to a new line so the next message doesn't overwrite the progress display.
     if cfg.handbrake.logging.show_progress {
@@ -73,7 +107,7 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
 
 fn process_line(
     line: &str,
-    log_writer: &mut Option<BufWriter<File>>,
+    log_writer: &mut Option<Arc<Mutex<BufWriter<File>>>>,
     cfg: &Config,
     ui: &Arc<Ui>,
 ) -> Result<()> {
@@ -85,6 +119,9 @@ fn process_line(
         }
         // Progress lines are not written to the log — they're too noisy.
     } else if let Some(writer) = log_writer {
+        let mut writer = writer
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire log writer lock: {e}"))?;
         writeln!(writer, "{line}")?;
     } else {
         ui.println(&format!("Writer was None, line: {line}"))?;
