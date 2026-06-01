@@ -113,6 +113,7 @@ fn process_line(
             .lock()
             .map_err(|e| anyhow::anyhow!("Failed to acquire log writer lock: {e}"))?;
         writeln!(writer, "{line}")?;
+        writer.flush()?;
     } else {
         ui.println(&format!("Writer was None, line: {line}"))?;
     }
