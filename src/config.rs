@@ -103,15 +103,28 @@ impl Default for LoggingConfig {
 impl LoggingConfig {
     /// Returns the log file path for this run, or `None` if output goes to stdout.
     /// `title` is used as the filename stem when `log_dir` is set.
-    pub fn get_log_file(&self, title: &str) -> Option<PathBuf> {
+    pub fn get_encode_log_file(&self, title: &str, stem: &str) -> Option<PathBuf> {
         if let Some(dir) = &self.log_dir {
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+            let ts = self.get_timestamp();
+            let folder = dir.join(title);
+            return Some(dir.join(folder).join(format!("{stem}_{ts}.log")));
+        }
+        self.log_file.clone()
+    }
+
+    pub fn get_rip_log_file(&self, title: &str) -> Option<PathBuf> {
+        if let Some(dir) = &self.log_dir {
+            let ts = self.get_timestamp();
             return Some(dir.join(format!("{title}_{ts}.log")));
         }
         self.log_file.clone()
+    }
+
+    fn get_timestamp(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
     }
 }
 
@@ -205,7 +218,9 @@ impl Config {
         apply_override(&args.hb_log_file, |v| {
             self.handbrake.logging.log_file = Some(v)
         });
-        if args.no_upload { self.upload.no_upload = true; }
+        if args.no_upload {
+            self.upload.no_upload = true;
+        }
         apply_override(&args.delete_rips, |v| self.cleanup.delete_rips = v);
     }
 
@@ -520,34 +535,91 @@ mod tests {
         assert_eq!(cfg.handbrake.output_format, OutputFormat::M4v);
     }
 
-    // --- get_log_file ---
+    // --- get_encode_log_file ---
 
     #[test]
-    fn get_log_file_none_when_neither_set() {
+    fn get_encode_log_file_none_when_neither_set() {
         let log = LoggingConfig::default();
-        assert!(log.get_log_file("The Matrix").is_none());
+        assert!(log.get_encode_log_file("The Matrix", "A1_t00").is_none());
     }
 
     #[test]
-    fn get_log_file_returns_log_file_path() {
+    fn get_encode_log_file_returns_log_file_path() {
         let log = LoggingConfig {
             log_file: Some("/tmp/out.log".into()),
             ..Default::default()
         };
         assert_eq!(
-            log.get_log_file("The Matrix"),
+            log.get_encode_log_file("The Matrix", "A1_t00"),
             Some(PathBuf::from("/tmp/out.log"))
         );
     }
 
     #[test]
-    fn get_log_file_dir_takes_precedence_over_file() {
+    fn get_encode_log_file_dir_takes_precedence_over_file() {
         let log = LoggingConfig {
             log_file: Some("/tmp/out.log".into()),
             log_dir: Some("/var/log/ripcord".into()),
             ..Default::default()
         };
-        let result = log.get_log_file("The_Matrix").unwrap();
+        let result = log.get_encode_log_file("The_Matrix", "A1_t00").unwrap();
+        assert_eq!(
+            result.parent().unwrap(),
+            std::path::Path::new("/var/log/ripcord/The_Matrix")
+        );
+        assert!(
+            result
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("A1_t00_")
+        );
+        assert!(result.extension().unwrap() == "log");
+    }
+
+    #[test]
+    fn get_encode_log_file_dir_embeds_title_in_filename() {
+        let log = LoggingConfig {
+            log_dir: Some("/tmp/logs".into()),
+            ..Default::default()
+        };
+        let result = log.get_encode_log_file("Inception", "A1_t00").unwrap();
+        let name = result.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("A1_t00_"),
+            "expected 'A1_t00_…', got '{name}'"
+        );
+    }
+
+    // --- get_rip_log_file ---
+
+    #[test]
+    fn get_rip_log_file_none_when_neither_set() {
+        let log = LoggingConfig::default();
+        assert!(log.get_rip_log_file("The Matrix").is_none());
+    }
+
+    #[test]
+    fn get_rip_log_file_returns_log_file_path() {
+        let log = LoggingConfig {
+            log_file: Some("/tmp/out.log".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            log.get_rip_log_file("The Matrix"),
+            Some(PathBuf::from("/tmp/out.log"))
+        );
+    }
+
+    #[test]
+    fn get_rip_log_file_dir_takes_precedence_over_file() {
+        let log = LoggingConfig {
+            log_file: Some("/tmp/out.log".into()),
+            log_dir: Some("/var/log/ripcord".into()),
+            ..Default::default()
+        };
+        let result = log.get_rip_log_file("The_Matrix").unwrap();
         assert_eq!(
             result.parent().unwrap(),
             std::path::Path::new("/var/log/ripcord")
@@ -564,12 +636,12 @@ mod tests {
     }
 
     #[test]
-    fn get_log_file_dir_embeds_title_in_filename() {
+    fn get_rip_log_file_dir_embeds_title_in_filename() {
         let log = LoggingConfig {
             log_dir: Some("/tmp/logs".into()),
             ..Default::default()
         };
-        let result = log.get_log_file("Inception").unwrap();
+        let result = log.get_rip_log_file("Inception").unwrap();
         let name = result.file_name().unwrap().to_str().unwrap();
         assert!(
             name.starts_with("Inception_"),

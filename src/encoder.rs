@@ -10,7 +10,7 @@ use std::{
 use crate::{config::Config, ui::Ui};
 use anyhow::Result;
 
-pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result<()> {
+pub fn encode(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<Ui>) -> Result<()> {
     let mut cmd = Command::new("HandBrakeCLI");
     cmd.arg("-i").arg(input);
     cmd.arg("-o").arg(output);
@@ -25,61 +25,70 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("encode");
-    let log_path = dbg!(cfg.handbrake.logging.get_log_file(stem));
-    let log_file = log_path
-        .as_ref()
-        .map(|p| {
-            Ok::<_, anyhow::Error>(Arc::new(Mutex::new(BufWriter::new(
-                OpenOptions::new().create(true).append(true).open(p)?,
-            ))))
-        })
-        .transpose()?;
+    let log_path = dbg!(cfg.handbrake.logging.get_encode_log_file(title, stem));
+    // let log_file = log_path
+    //     .as_ref()
+    //     .map(|p| {
+    //         Ok::<_, anyhow::Error>(Arc::new(Mutex::new(BufWriter::new(
+    //             OpenOptions::new().create(true).append(true).open(p)?,
+    //         ))))
+    //     })
+    //     .transpose()?;
 
+    if let Some(parent) = log_path.as_ref().map(|p| p.parent()).flatten() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path.as_ref().expect("No log path"))?;
+
+    let log_file_stderr = log_file.try_clone()?;
     // Pipe stdout so we can parse progress; stderr is piped to the log file if enabled.
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
+    cmd.stdout(log_file);
+    cmd.stderr(log_file_stderr);
 
     let mut child = cmd.spawn()?;
 
-    let stdout_reader = BufReader::new(child.stdout.take().expect("stdout was piped"));
-    let stderr_reader = BufReader::new(child.stderr.take().expect("stdout was piped"));
+    // let stdout_reader = BufReader::new(child.stdout.take().expect("stdout was piped"));
+    // let stderr_reader = BufReader::new(child.stderr.take().expect("stdout was piped"));
 
-    let stdout_cfg = cfg.clone();
-    let stderr_cfg = cfg.clone();
+    // let stdout_cfg = cfg.clone();
+    // let stderr_cfg = cfg.clone();
 
-    let stdout_ui = ui.clone();
-    let stderr_ui = ui.clone();
+    // let stdout_ui = ui.clone();
+    // let stderr_ui = ui.clone();
 
-    let mut log_stdout = log_file.as_ref().map(Arc::clone);
-    let stdout_thread = thread::spawn(move || {
-        for line in stdout_reader.lines() {
-            match line {
-                Ok(line) if line.len() == 0 => break,
-                Ok(line) => {
-                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-                    process_line(trimmed, &mut log_stdout, &stdout_cfg, &stdout_ui).ok();
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    // let mut log_stdout = log_file.as_ref().map(Arc::clone);
+    // let stdout_thread = thread::spawn(move || {
+    //     for line in stdout_reader.lines() {
+    //         match line {
+    //             Ok(line) if line.len() == 0 => break,
+    //             Ok(line) => {
+    //                 let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+    //                 process_line(trimmed, &mut log_stdout, &stdout_cfg, &stdout_ui).ok();
+    //             }
+    //             Err(_) => break,
+    //         }
+    //     }
+    // });
 
-    let mut log_stderr = log_file.map(|f| f.clone());
-    let stderr_thread = thread::spawn(move || {
-        for line in stderr_reader.lines() {
-            match line {
-                Ok(line) if line.len() == 0 => break,
-                Ok(line) => {
-                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-                    process_line(trimmed, &mut log_stderr, &stderr_cfg, &stderr_ui).ok();
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    // let mut log_stderr = log_file.map(|f| f.clone());
+    // let stderr_thread = thread::spawn(move || {
+    //     for line in stderr_reader.lines() {
+    //         match line {
+    //             Ok(line) if line.len() == 0 => break,
+    //             Ok(line) => {
+    //                 let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+    //                 process_line(trimmed, &mut log_stderr, &stderr_cfg, &stderr_ui).ok();
+    //             }
+    //             Err(_) => break,
+    //         }
+    //     }
+    // });
 
-    stdout_thread.join().unwrap();
-    stderr_thread.join().unwrap();
+    // stdout_thread.join().unwrap();
+    // stderr_thread.join().unwrap();
 
     // Move the cursor to a new line so the next message doesn't overwrite the progress display.
     if cfg.handbrake.logging.show_progress {

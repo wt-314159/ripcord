@@ -48,7 +48,11 @@ pub fn rip_disc(title: &str, min_length_seconds: u64, cfg: &Config) -> Result<Pa
 
     let mut cmd = Command::new("makemkvcon");
 
-    if let Some(log_file) = cfg.makemkv.logging.get_log_file(&sanitize_filename(title)) {
+    if let Some(log_file) = cfg
+        .makemkv
+        .logging
+        .get_rip_log_file(&sanitize_filename(title))
+    {
         cmd.arg(format!("--messages={}", log_file.display()));
     }
 

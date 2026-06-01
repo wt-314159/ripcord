@@ -46,7 +46,7 @@ fn handle_encode(args: &cli::EncodeArgs, cfg: &config::Config) -> Result<()> {
     });
 
     let ui = Arc::new(Ui::new());
-    encoder::encode(&args.input, &output, cfg, &ui)?;
+    encoder::encode(&args.input, &output, cfg, &title, &ui)?;
 
     if !cfg.upload.no_upload {
         uploader::check_nas_accessible(cfg)?;

@@ -38,14 +38,17 @@ pub fn run_loop(cfg: &mut Config) -> Result<()> {
 
     let ui = Arc::new(Ui::new());
     let ui_for_encode = ui.clone();
+    let ui_for_upload = ui.clone();
+
     let cfg_for_encode = cfg.clone();
+    let cfg_for_upload = cfg.clone();
+
     let encode_worker = thread::spawn(move || {
         run_encode_worker(encode_rx, upload_tx, &cfg_for_encode, ui_for_encode);
     });
 
-    let cfg_for_upload = cfg.clone();
     let upload_worker = thread::spawn(move || {
-        run_upload_worker(upload_rx, &cfg_for_upload);
+        run_upload_worker(upload_rx, &cfg_for_upload, &ui_for_upload);
     });
 
     let ask_extras = cfg.extras.mode == ExtrasMode::Ask;
@@ -203,7 +206,7 @@ fn process_encode(
             local_encode_path(&job.mkv_path, &job.title, job.is_extra, cfg)
         };
 
-        encoder::encode(&job.mkv_path, &output, cfg, ui)?;
+        encoder::encode(&job.mkv_path, &output, cfg, &job.title, ui)?;
         output
     } else {
         // No encoding — pass the raw MKV through to the upload step.
@@ -231,14 +234,15 @@ fn process_encode(
     Ok(())
 }
 
-fn run_upload_worker(rx: Receiver<UploadJob>, cfg: &Config) {
+fn run_upload_worker(rx: Receiver<UploadJob>, cfg: &Config, ui: &Arc<Ui>) {
     for job in rx {
         let label = job_label(&job.title, job.is_extra);
-        println!("[upload] Uploading {label}...");
+        ui.println(&format!("[upload] Uploading {label}...")).ok();
         match uploader::upload_file(&job.encoded_path, &job.title, job.is_extra, cfg) {
             Err(e) => eprintln!("[upload] Failed {label}: {e}"),
             Ok(dest) => {
-                println!("[upload] Uploaded {label} to: {}", dest.display());
+                ui.println(&format!("[upload] Uploaded {label} to: {}", dest.display()))
+                    .ok();
                 if cfg.cleanup.delete_rips {
                     delete_rip_file(&job.mkv_path);
                 }
