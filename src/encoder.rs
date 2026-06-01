@@ -26,7 +26,7 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
         .and_then(|s| s.to_str())
         .unwrap_or("encode");
     let log_path = dbg!(cfg.handbrake.logging.get_log_file(stem));
-    let mut log_file = log_path
+    let log_file = log_path
         .as_ref()
         .map(|p| {
             Ok::<_, anyhow::Error>(Arc::new(Mutex::new(BufWriter::new(
@@ -34,16 +34,6 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
             ))))
         })
         .transpose()?;
-    let mut log_writer: Option<BufWriter<File>> = dbg!(
-        log_path
-            .as_ref()
-            .map(|p| {
-                Ok::<_, anyhow::Error>(BufWriter::new(dbg!(
-                    OpenOptions::new().create(true).append(true).open(p)?
-                )))
-            })
-            .transpose()?
-    );
 
     // Pipe stdout so we can parse progress; stderr is piped to the log file if enabled.
     cmd.stdout(Stdio::piped());
@@ -51,8 +41,8 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
 
     let mut child = cmd.spawn()?;
 
-    let mut stdout_reader = BufReader::new(child.stdout.take().expect("stdout was piped"));
-    let mut stderr_reader = BufReader::new(child.stderr.take().expect("stdout was piped"));
+    let stdout_reader = BufReader::new(child.stdout.take().expect("stdout was piped"));
+    let stderr_reader = BufReader::new(child.stderr.take().expect("stdout was piped"));
 
     let stdout_cfg = cfg.clone();
     let stderr_cfg = cfg.clone();
@@ -67,9 +57,9 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
                 Ok(line) if line.len() == 0 => break,
                 Ok(line) => {
                     let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-                    process_line(trimmed, &mut log_stdout, &stdout_cfg, &stdout_ui);
+                    process_line(trimmed, &mut log_stdout, &stdout_cfg, &stdout_ui).ok();
                 }
-                Err(e) => break,
+                Err(_) => break,
             }
         }
     });
@@ -81,9 +71,9 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, ui: &Arc<Ui>) -> Result
                 Ok(line) if line.len() == 0 => break,
                 Ok(line) => {
                     let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-                    process_line(trimmed, &mut log_stderr, &stderr_cfg, &stderr_ui);
+                    process_line(trimmed, &mut log_stderr, &stderr_cfg, &stderr_ui).ok();
                 }
-                Err(e) => break,
+                Err(_) => break,
             }
         }
     });
