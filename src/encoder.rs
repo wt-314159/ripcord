@@ -1,6 +1,7 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader, Write},
+    os::unix::process::ExitStatusExt,
     path::Path,
     process::{Command, Stdio},
     sync::{Arc, Mutex},
@@ -21,81 +22,74 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<U
     cmd.arg("--preset").arg(&cfg.handbrake.preset);
     cmd.args(&cfg.handbrake.extra_args);
 
+    // Pipe stdout so we can parse progress; stderr is piped to the log file if enabled.
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
     let stem = input
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("encode");
-    let log_path = dbg!(cfg.handbrake.logging.get_encode_log_file(title, stem));
-    // let log_file = log_path
-    //     .as_ref()
-    //     .map(|p| {
-    //         Ok::<_, anyhow::Error>(Arc::new(Mutex::new(BufWriter::new(
-    //             OpenOptions::new().create(true).append(true).open(p)?,
-    //         ))))
-    //     })
-    //     .transpose()?;
+    let log_path = cfg.handbrake.logging.get_encode_log_file(title, stem);
 
     if let Some(parent) = log_path.as_ref().map(|p| p.parent()).flatten() {
         std::fs::create_dir_all(parent)?;
     }
-    let log_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path.as_ref().expect("No log path"))?;
-
-    let log_file_stderr = log_file.try_clone()?;
-    // Pipe stdout so we can parse progress; stderr is piped to the log file if enabled.
-    cmd.stdout(log_file);
-    cmd.stderr(log_file_stderr);
+    let mut log_file = log_path
+        .as_ref()
+        .map(|p| {
+            Ok::<_, anyhow::Error>(Arc::new(Mutex::new(
+                OpenOptions::new().create(true).append(true).open(p)?,
+            )))
+        })
+        .transpose()?;
+    let mut log_file_stderr = log_file.as_ref().map(Arc::clone);
 
     let mut child = cmd.spawn()?;
 
-    // let stdout_reader = BufReader::new(child.stdout.take().expect("stdout was piped"));
-    // let stderr_reader = BufReader::new(child.stderr.take().expect("stdout was piped"));
+    let stdout = child.stdout.take().expect("Failed to capture stdout");
+    let stderr = child.stderr.take().expect("Failed to capture stderr");
 
-    // let stdout_cfg = cfg.clone();
-    // let stderr_cfg = cfg.clone();
+    let stdout_cfg = cfg.clone();
+    let stderr_cfg = cfg.clone();
 
-    // let stdout_ui = ui.clone();
-    // let stderr_ui = ui.clone();
+    let stdout_ui = ui.clone();
+    let stderr_ui = ui.clone();
 
-    // let mut log_stdout = log_file.as_ref().map(Arc::clone);
-    // let stdout_thread = thread::spawn(move || {
-    //     for line in stdout_reader.lines() {
-    //         match line {
-    //             Ok(line) if line.len() == 0 => break,
-    //             Ok(line) => {
-    //                 let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-    //                 process_line(trimmed, &mut log_stdout, &stdout_cfg, &stdout_ui).ok();
-    //             }
-    //             Err(_) => break,
-    //         }
-    //     }
-    // });
+    let stdout_thread = thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+                    process_line(trimmed, &mut log_file, &stdout_cfg, &stdout_ui).ok();
+                }
+                Err(_) => break,
+            }
+        }
+    });
 
-    // let mut log_stderr = log_file.map(|f| f.clone());
-    // let stderr_thread = thread::spawn(move || {
-    //     for line in stderr_reader.lines() {
-    //         match line {
-    //             Ok(line) if line.len() == 0 => break,
-    //             Ok(line) => {
-    //                 let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-    //                 process_line(trimmed, &mut log_stderr, &stderr_cfg, &stderr_ui).ok();
-    //             }
-    //             Err(_) => break,
-    //         }
-    //     }
-    // });
+    let stderr_thread = thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+                    process_line(trimmed, &mut log_file_stderr, &stderr_cfg, &stderr_ui).ok();
+                }
+                Err(_) => break,
+            }
+        }
+    });
 
-    // stdout_thread.join().unwrap();
-    // stderr_thread.join().unwrap();
-
-    // Move the cursor to a new line so the next message doesn't overwrite the progress display.
-    if cfg.handbrake.logging.show_progress {
-        println!();
-    }
+    stdout_thread.join().expect("stdout thread panicked");
+    stderr_thread.join().expect("stderr thread panicked");
 
     let status = child.wait()?;
+
+    if let Some(signal) = status.signal() {
+        eprintln!("HandBrake terminated with signal: {}", signal);
+    }
 
     if !status.success() {
         return Err(EncodeError::HandBrakeFailed(status.code()).into());
@@ -106,7 +100,7 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<U
 
 fn process_line(
     line: &str,
-    log_writer: &mut Option<Arc<Mutex<BufWriter<File>>>>,
+    log_writer: &mut Option<Arc<Mutex<File>>>,
     cfg: &Config,
     ui: &Arc<Ui>,
 ) -> Result<()> {
