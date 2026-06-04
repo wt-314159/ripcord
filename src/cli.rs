@@ -70,9 +70,10 @@ pub struct RunArgs {
 
 #[derive(Parser, Debug)]
 pub struct EncodeArgs {
-    /// Path to the MKV file to encode
+    /// Path to the MKV file to encode, or directory containing MKV files to encode
     pub input: PathBuf,
-    /// Explicit output path for the encoded file (default: same directory as input)
+    /// Explicit output path for the encoded file (default: same directory as input),
+    /// or directory to output encoded files to (if input is a directory)
     #[arg(short, long)]
     pub output: Option<PathBuf>,
     /// Movie title used when uploading to the NAS (default: input filename stem)

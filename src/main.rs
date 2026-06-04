@@ -1,9 +1,13 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Result;
 use clap::Parser;
 
-use crate::ui::Ui;
+use crate::{config::Config, ui::Ui};
 
 pub mod cli;
 pub mod config;
@@ -30,32 +34,59 @@ fn main() -> Result<()> {
 }
 
 fn handle_encode(args: &cli::EncodeArgs, cfg: &config::Config) -> Result<()> {
-    let title = args
-        .title
-        .clone()
-        .or_else(|| stem_str(&args.input))
-        .unwrap_or_else(|| String::from("unknown"));
-
-    let output = args.output.clone().unwrap_or_else(|| {
-        let ext = cfg.handbrake.output_format.extension();
-        let stem = args.input.file_stem().unwrap_or_default();
-        args.input
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join(format!("{}.{ext}", stem.to_string_lossy()))
-    });
-
     let ui = Arc::new(Ui::new());
-    encoder::encode(&args.input, &output, cfg, &title, &ui)?;
+
+    if args.input.is_dir() {
+        let files = std::fs::read_dir(&args.input)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("mkv"));
+
+        for file in files {
+            let title = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
+
+            let ext = cfg.handbrake.output_format.extension();
+            let output_dir = args.output.clone().unwrap_or(args.input.clone());
+            let output = output_dir.join(format!("{}.{ext}", title));
+
+            encode_file(&file, &output, cfg, &title, &ui)?;
+        }
+        Ok(())
+    } else {
+        let title = args
+            .title
+            .clone()
+            .or_else(|| stem_str(&args.input))
+            .unwrap_or_else(|| String::from("unknown"));
+
+        let output = args.output.clone().unwrap_or_else(|| {
+            // TODO check that having same name for output as input doesn't cause issues in handbrake
+            let ext = cfg.handbrake.output_format.extension();
+            let stem = args.input.file_stem().unwrap_or_default();
+            args.input
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join(format!("{}.{ext}", stem.to_string_lossy()))
+        });
+
+        encode_file(&args.input, &output, cfg, &title, &ui)
+    }
+}
+
+fn encode_file(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<Ui>) -> Result<()> {
+    encoder::encode(input, output, cfg, title, ui)?;
 
     if !cfg.upload.no_upload {
         uploader::check_nas_accessible(cfg)?;
-        let dest = uploader::upload_file(&output, &title, false, cfg)?;
+        let dest = uploader::upload_file(output, title, false, cfg)?;
         println!("Uploaded to: {}", dest.display());
     }
 
     if cfg.cleanup.delete_rips {
-        pipeline::delete_rip_file(&args.input);
+        pipeline::delete_rip_file(input);
     }
 
     Ok(())

@@ -16,6 +16,9 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<U
     cmd.arg("-i").arg(input);
     cmd.arg("-o").arg(output);
 
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     if let Some(ref preset_file) = cfg.handbrake.preset_file {
         cmd.arg("--preset-import-file").arg(preset_file);
     }
