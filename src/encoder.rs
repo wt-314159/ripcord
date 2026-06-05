@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::unix::process::ExitStatusExt,
     path::Path,
     process::{Command, Stdio},
@@ -38,7 +38,7 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<U
     if let Some(parent) = log_path.as_ref().map(|p| p.parent()).flatten() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut log_file = log_path
+    let log_file = log_path
         .as_ref()
         .map(|p| {
             Ok::<_, anyhow::Error>(Arc::new(Mutex::new(
@@ -46,7 +46,7 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<U
             )))
         })
         .transpose()?;
-    let mut log_file_stderr = log_file.as_ref().map(Arc::clone);
+    let log_file_stderr = log_file.as_ref().map(Arc::clone);
 
     let mut child = cmd.spawn()?;
 
@@ -59,31 +59,8 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<U
     let stdout_ui = ui.clone();
     let stderr_ui = ui.clone();
 
-    let stdout_thread = thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-                    process_line(trimmed, &mut log_file, &stdout_cfg, &stdout_ui).ok();
-                }
-                Err(_) => break,
-            }
-        }
-    });
-
-    let stderr_thread = thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
-                    process_line(trimmed, &mut log_file_stderr, &stderr_cfg, &stderr_ui).ok();
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    let stdout_thread = spawn_reader_thread(stdout, log_file, stdout_cfg, stdout_ui);
+    let stderr_thread = spawn_reader_thread(stderr, log_file_stderr, stderr_cfg, stderr_ui);
 
     stdout_thread.join().expect("stdout thread panicked");
     stderr_thread.join().expect("stderr thread panicked");
@@ -99,6 +76,26 @@ pub fn encode(input: &Path, output: &Path, cfg: &Config, title: &str, ui: &Arc<U
     }
 
     Ok(())
+}
+
+fn spawn_reader_thread<R: Read + Send + 'static>(
+    pipe: R,
+    mut log_file: Option<Arc<Mutex<File>>>,
+    config: Config,
+    ui: Arc<Ui>,
+) -> std::thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let reader = BufReader::new(pipe);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+                    process_line(trimmed, &mut log_file, &config, &ui).ok();
+                }
+                Err(_) => break,
+            }
+        }
+    })
 }
 
 fn process_line(
