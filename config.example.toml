@@ -92,6 +92,11 @@ show_progress = true
 # log_dir = "/var/log/ripcord"
 
 
+[dvdread]
+# Path to the DVD device to read from. Defaults to /dev/sr0.
+device_path = "/dev/sr0"
+
+
 [upload]
 # Set to true to skip all NAS uploads. Encoded files stay in output_dir.
 # Useful when you want to encode a batch locally and copy manually later.

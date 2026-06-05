@@ -29,6 +29,7 @@ pub enum Command {
         #[arg(default_value = "config.toml")]
         path: PathBuf,
     },
+    Test,
 }
 
 #[derive(Parser, Debug)]

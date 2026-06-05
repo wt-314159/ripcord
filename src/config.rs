@@ -16,6 +16,7 @@ pub struct Config {
     pub paths: PathsConfig,
     pub makemkv: MakeMkvConfig,
     pub handbrake: HandBrakeConfig,
+    pub dvdread: DvdReadConfig,
     pub upload: UploadConfig,
     pub extras: ExtrasConfig,
     pub cleanup: CleanupConfig,
@@ -78,6 +79,20 @@ impl Default for HandBrakeConfig {
             extra_args: Vec::new(),
             output_format: OutputFormat::default(),
             logging: LoggingConfig::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct DvdReadConfig {
+    pub device_path: PathBuf,
+}
+
+impl Default for DvdReadConfig {
+    fn default() -> Self {
+        Self {
+            device_path: PathBuf::from("/dev/sr0"),
         }
     }
 }
@@ -171,7 +186,7 @@ impl Config {
     pub fn load(cli: &Cli) -> Result<Self> {
         let mut cfg = match &cli.config {
             Some(p) => toml::from_str(&fs::read_to_string(p)?)?,
-            None => Self::default(),
+            _ => Self::default(),
         };
 
         match &cli.command {

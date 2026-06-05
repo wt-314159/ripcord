@@ -1,3 +1,4 @@
+use core::option::Option::None;
 use std::{
     collections::HashMap,
     fs,
@@ -5,7 +6,7 @@ use std::{
     process::Command,
 };
 
-use crate::config::Config;
+use crate::{config::Config, dvdread::TitleInfo};
 use anyhow::Result;
 
 const ATTR_DURATION: u32 = 9;
@@ -29,6 +30,22 @@ pub fn get_disc_info(cfg: &Config) -> Result<Vec<DiscTitle>> {
     }
 
     Ok(parse_disc_info(&String::from_utf8_lossy(&output.stdout)))
+}
+
+pub fn pick_episodes(titles: &[TitleInfo], min_secs: f64) -> Vec<&TitleInfo> {
+    let mut candidates: Vec<&TitleInfo> = titles
+        .iter()
+        .filter(|t| t.duration_secs >= min_secs)
+        .collect();
+
+    // Detect a "play all" title, with duration roughly the sum of several others
+    if let Some(total) = candidates.iter().map(|t| t.duration_secs).reduce(f64::max) {
+        let sum_without_max = candidates.iter().map(|t| t.duration_secs).sum::<f64>() - total;
+        if (total - sum_without_max).abs() < 120.0 {
+            candidates.retain(|t| t.duration_secs < total);
+        }
+    }
+    candidates
 }
 
 /// Returns a min-length (seconds) that captures only the longest title on the disc.

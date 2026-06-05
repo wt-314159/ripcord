@@ -1,3 +1,4 @@
+use core::option::Option::None;
 use std::{fs, path::Path, sync::Arc};
 
 use anyhow::Result;
@@ -7,6 +8,7 @@ use crate::{config::Config, ui::Ui};
 
 pub mod cli;
 pub mod config;
+pub mod dvdread;
 pub mod encoder;
 pub mod pipeline;
 pub mod ripper;
@@ -23,6 +25,7 @@ fn main() -> Result<()> {
         Some(cli::Command::Encode(args)) => handle_encode(args, &cfg)?,
         Some(cli::Command::Upload(args)) => handle_upload(args, &cfg)?,
         Some(cli::Command::InitConfig { path }) => handle_init_config(path)?,
+        Some(cli::Command::Test) => test(&cfg)?,
         None => eprintln!("No command specified. Use --help for usage."),
     }
 
@@ -113,6 +116,28 @@ fn handle_init_config(path: &std::path::PathBuf) -> Result<()> {
     let toml = toml::to_string_pretty(&config::Config::default())?;
     fs::write(path, toml)?;
     println!("Default config written to '{}'.", path.display());
+    Ok(())
+}
+
+fn test(cfg: &config::Config) -> Result<()> {
+    let titles = dvdread::read_titles(&cfg.dvdread.device_path.to_string_lossy().to_string())?;
+    println!("Found {} titles.", titles.len());
+
+    // Filter out anything less than 10 minutes (600 seconds)
+    let filtered = ripper::pick_episodes(&titles, 600f64);
+
+    println!("Filtered to {} titles.", filtered.len());
+    for (i, title) in filtered.iter().enumerate() {
+        println!(
+            "  {}. {} - duration: {}s - chapters: {} - vts: {}, frames: {}",
+            i + 1,
+            title.title_number,
+            title.duration_secs,
+            title.chapters,
+            title.vts,
+            title.duration_secs * title.fps as f64,
+        );
+    }
     Ok(())
 }
 
